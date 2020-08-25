@@ -31,6 +31,10 @@ export interface TransportFactory {
   (): Transport;
 }
 
+export interface Inbound {
+  parse(buf: Uint8Array): void;
+}
+
 export interface Transport extends AsyncIterable<Uint8Array> {
   readonly isClosed: boolean;
   readonly lang: string;
@@ -40,6 +44,7 @@ export interface Transport extends AsyncIterable<Uint8Array> {
   connect(
     hp: { hostname: string; port: number },
     opts: ConnectionOptions,
+    inbound: Inbound
   ): Promise<void>;
 
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array>;

@@ -28,6 +28,7 @@ export {
 export {
   Transport,
   setTransportFactory,
+  Inbound
 } from "./transport.ts";
 export {
   Connect,

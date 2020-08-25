@@ -26,6 +26,7 @@ import {
   checkOptions,
   NatsError,
   ErrorCode,
+  Inbound
 } from "../nats-base-client/internal_mod.ts";
 import { TlsOptions } from "../nats-base-client/types.ts";
 
@@ -53,6 +54,7 @@ export class DenoTransport implements Transport {
   private closedNotification: Deferred<void | Error> = deferred();
   private conn!: Conn;
   private writer!: BufWriter;
+  private inbound!: Inbound;
 
   // the async writes to the socket do not guarantee
   // the order of the writes - this leads to interleaving
@@ -69,8 +71,10 @@ export class DenoTransport implements Transport {
   async connect(
     hp: { hostname: string; port: number },
     options: ConnectionOptions,
+    inbound: Inbound
   ): Promise<any> {
     this.options = options;
+    this.inbound = inbound;
     try {
       this.conn = await Deno.connect(hp);
       const info = await this.peekInfo();
@@ -82,6 +86,7 @@ export class DenoTransport implements Transport {
       } else {
         this.writer = new BufWriter(this.conn);
       }
+      this.start();
     } catch (err) {
       err = err.name === "ConnectionRefused"
         ? NatsError.errorForCode(ErrorCode.CONNECTION_REFUSED)
@@ -134,6 +139,37 @@ export class DenoTransport implements Transport {
     );
     this.encrypted = true;
     this.writer = new BufWriter(this.conn);
+  }
+
+  async start() {
+    let reason: Error | undefined;
+    // yield what we initially read
+    this.inbound.parse(this.buf);
+    this.buf = new Uint8Array(64 * 1024);
+
+    while (!this.done) {
+      try {
+        let c = await this.conn.read(this.buf);
+        if (c === null) {
+          break;
+        }
+        if (c) {
+          const frame = this.buf.slice(0, c);
+          if (this.options.debug) {
+            console.info(`> ${render(frame)}`);
+          }
+          try {
+            this.inbound.parse(frame);
+          } catch(err) {
+            // parser will deal with it
+          }
+        }
+      } catch (err) {
+        reason = err;
+        break;
+      }
+    }
+    this._closed(reason);
   }
 
   async *[Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {

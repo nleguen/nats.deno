@@ -22,7 +22,7 @@ import {
   DEFAULT_PING_INTERVAL,
   DEFAULT_MAX_PING_OUT,
 } from "./types.ts";
-import { Transport, newTransport } from "./transport.ts";
+import { Transport, newTransport, Inbound } from "./transport.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import {
   CR_LF,
@@ -92,7 +92,7 @@ export interface Publisher {
   ): void;
 }
 
-export class ProtocolHandler implements Dispatcher<ParserEvent> {
+export class ProtocolHandler implements Dispatcher<ParserEvent>, Inbound {
   connected = false;
   connectedOnce = false;
   infoReceived = false;
@@ -143,6 +143,10 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       this.options.pingInterval || DEFAULT_PING_INTERVAL,
       this.options.maxPingOut || DEFAULT_MAX_PING_OUT,
     );
+  }
+
+  parse(buf: Uint8Array): void {
+    this.parser.parse(buf);
   }
 
   resetOutbound(): void {
@@ -244,16 +248,16 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     const pong = this.prepare();
     const timer = timeout(this.options.timeout || 20000);
     try {
-      await this.transport.connect(srv.hostport(), this.options);
-      (async () => {
-        try {
-          for await (const b of this.transport) {
-            this.parser.parse(b);
-          }
-        } catch (err) {
-          console.log("reader closed", err);
-        }
-      })().then();
+      await this.transport.connect(srv.hostport(), this.options, this);
+      // (async () => {
+      //   try {
+      //     for await (const b of this.transport) {
+      //       this.parser.parse(b);
+      //     }
+      //   } catch (err) {
+      //     console.log("reader closed", err);
+      //   }
+      // })().then();
     } catch (err) {
       pong.reject(err);
     }
