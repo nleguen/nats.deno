@@ -410,3 +410,23 @@ export function toConf(o: any, indent?: string): string {
   }
   return buf.join("\n");
 }
+
+export const jsopts = {
+  // debug: true,
+  // trace: true,
+  jetstream: {
+    max_file_store: 1024 * 1024,
+    max_memory_store: 1024 * 1024,
+    store_dir: "/tmp",
+  },
+};
+
+export function JetStreamConfig(opts = {}, randomStoreDir = true): any {
+  const conf = Object.assign(opts, jsopts);
+  if (randomStoreDir) {
+    conf.jetstream.store_dir = path.join("/tmp", "jetstream", nuid.next());
+  }
+  Deno.mkdirSync(conf.jetstream.store_dir, { recursive: true });
+
+  return opts;
+}
