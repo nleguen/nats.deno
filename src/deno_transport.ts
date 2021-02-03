@@ -25,6 +25,7 @@ import {
   INFO,
   NatsError,
   render,
+  Server,
   ServerInfo,
   TE,
   Transport,

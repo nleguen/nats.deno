@@ -18,8 +18,6 @@ import { ErrorCode, NatsError } from "./error.ts";
 import type { MsgHdrsImpl } from "./headers.ts";
 import { createInbox } from "./protocol.ts";
 
-const noResponders = "503";
-
 export class MuxSubscription {
   baseInbox!: string;
   reqs: Map<string, Request>;
@@ -69,14 +67,10 @@ export class MuxSubscription {
           if (err === null && m.headers) {
             const headers = m.headers as MsgHdrsImpl;
             if (headers.hasError) {
-              if (headers.status === noResponders) {
-                err = NatsError.errorForCode(ErrorCode.NO_RESPONDERS);
-              } else {
-                err = new NatsError(
-                  headers.status,
-                  ErrorCode.REQUEST_ERROR,
-                );
-              }
+              err = new NatsError(
+                headers.status,
+                ErrorCode.REQUEST_ERROR,
+              );
             }
           }
           r.resolver(err, m);

@@ -254,11 +254,9 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
 
   async dial(srv: ServerImpl): Promise<void> {
     const pong = this.prepare();
-    let timer;
+    const timer = timeout(this.options.timeout || 20000);
     try {
-      timer = timeout(this.options.timeout || 20000);
-      const cp = this.transport.connect(srv, this.options);
-      await Promise.race([cp, timer]);
+      await this.transport.connect(srv, this.options);
       (async () => {
         try {
           for await (const b of this.transport) {
@@ -274,9 +272,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
 
     try {
       await Promise.race([timer, pong]);
-      if (timer) {
-        timer.cancel();
-      }
+      timer.cancel();
       this.connected = true;
       this.connectError = undefined;
       this.sendSubscriptions();
@@ -286,9 +282,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       this.flushPending();
       this.heartbeats.start();
     } catch (err) {
-      if (timer) {
-        timer.cancel();
-      }
+      timer.cancel();
       await this.transport.close(err);
       throw err;
     }
@@ -317,10 +311,10 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
         } catch (err) {
           lastError = err;
           if (!this.connectedOnce) {
-            if (this.options.waitOnFirstConnect) {
-              continue;
+            if (!this.options.waitOnFirstConnect) {
+              this.servers.removeCurrentServer();
             }
-            this.servers.removeCurrentServer();
+            continue;
           }
           srv.reconnects++;
           const mra = this.options.maxReconnectAttempts || 0;

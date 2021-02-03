@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-undef
 /*
  * Copyright 2020-2021 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");

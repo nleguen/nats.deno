@@ -17,17 +17,12 @@
 import { connect, NatsConnection } from "../../src/mod.ts";
 
 // the connection is configured by a set of ConnectionOptions
-// if none is set, the client will connect to 127.0.0.1:4222:
+// if none is set, the client will connect to 127.0.0.1:4222.
+// common options:
 const localhostAtStandardPort = {};
-
-// you can also specify a port:
 const localPort = { port: 4222 };
-
-// or a host using the standard 4222 port:
-const hostAtStdPort = { servers: "demo.nats.io" };
-
-// or the full host port
-const hostPort = { servers: "demo.nats.io:4222" };
+const hostAtStdPort = { url: "demo.nats.io" };
+const hostPort = { url: "demo.nats.io:4222" };
 
 // let's try to connect to all the above, some may fail
 const dials: Promise<NatsConnection>[] = [];
@@ -45,6 +40,7 @@ await Promise.allSettled(dials)
       return v.status === "fulfilled";
     });
     // and now extract all the connections
+    //@ts-ignore:
     const values = fulfilled.map((v) => v.value);
     conns.push(...values);
   });
@@ -52,11 +48,11 @@ await Promise.allSettled(dials)
 // Print where we connected, and register a close handler
 conns.forEach((nc) => {
   console.log(`connected to ${nc.getServer()}`);
-  // you can get notified when the client exits by getting `closed()`.
+  // you can get notified when the client exits by getting closed.
   // closed resolves void or with an error if the connection
   // closed because of an error
   nc.closed()
-    .then((err: void | Error) => {
+    .then((err) => {
       let m = `connection to ${nc.getServer()} closed`;
       if (err) {
         m = `${m} with an error: ${err.message}`;
