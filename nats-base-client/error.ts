@@ -41,6 +41,12 @@ export enum ErrorCode {
   UNKNOWN = "UNKNOWN_ERROR",
   WSS_REQUIRED = "WSS_REQUIRED",
 
+  NO_RESPONDERS = "NO_RESPONDERS",
+
+  // JETSTREAM
+  JETSTREAM_NOT_ENABLED = "JETSTREAM_NOT_ENABLED",
+  INVALID_JS_ACK = "INVALID_JS_ACK",
+
   // emitted by the server
   AUTHORIZATION_VIOLATION = "AUTHORIZATION_VIOLATION",
   NATS_PROTOCOL_ERR = "NATS_PROTOCOL_ERR",
@@ -52,13 +58,15 @@ export class Messages {
 
   constructor() {
     this.messages = new Map<string, string>();
-
     this.messages.set(
       ErrorCode.INVALID_PAYLOAD_TYPE,
       "Invalid payload type - payloads can be 'binary', 'string', or 'json'",
     );
     this.messages.set(ErrorCode.BAD_JSON, "Bad JSON");
-
+    this.messages.set(
+      ErrorCode.INVALID_JS_ACK,
+      "invalid jetstream publish response",
+    );
     this.messages.set(
       ErrorCode.WSS_REQUIRED,
       "TLS is required, therefore a secure websocket connection is also required",
@@ -84,13 +92,13 @@ export class NatsError extends Error {
   chainedError?: Error;
 
   /**
-     * @param {String} message
-     * @param {String} code
-     * @param {Error} [chainedError]
-     * @constructor
-     *
-     * @api private
-     */
+   * @param {String} message
+   * @param {String} code
+   * @param {Error} [chainedError]
+   * @constructor
+   *
+   * @api private
+   */
   constructor(message: string, code: string, chainedError?: Error) {
     super(message);
     this.name = "NatsError";
