@@ -54,10 +54,10 @@ export enum ErrorCode {
 }
 
 export class Messages {
-  messages: Map<string, string>;
+  messages: Map<ErrorCode, string>;
 
   constructor() {
-    this.messages = new Map<string, string>();
+    this.messages = new Map<ErrorCode, string>();
     this.messages.set(
       ErrorCode.INVALID_PAYLOAD_TYPE,
       "Invalid payload type - payloads can be 'binary', 'string', or 'json'",
@@ -73,12 +73,12 @@ export class Messages {
     );
   }
 
-  static getMessage(s: string): string {
+  static getMessage(s: ErrorCode): string {
     return messages.getMessage(s);
   }
 
-  getMessage(s: string): string {
-    return this.messages.get(s) || s;
+  getMessage(s: ErrorCode): string {
+    return this.messages.get(s) || `${s}`;
   }
 }
 
@@ -107,7 +107,7 @@ export class NatsError extends Error {
     this.chainedError = chainedError;
   }
 
-  static errorForCode(code: string, chainedError?: Error): NatsError {
+  static errorForCode(code: ErrorCode, chainedError?: Error): NatsError {
     const m = Messages.getMessage(code);
     return new NatsError(m, code, chainedError);
   }

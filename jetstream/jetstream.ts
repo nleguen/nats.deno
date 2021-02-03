@@ -7,7 +7,7 @@ import type {
   ConsumerLister, DeliveryInfo,
   JetStreamClient,
   JetStreamManager,
-  JetStreamOptions,
+  JetStreamOptions, JetStreamPubOption,
   JetStreamPubOpts,
   JetStreamSubOpts, JsMsg,
   PubAck,
@@ -110,7 +110,7 @@ class BaseClient {
       if (r.error.code === 503) {
         throw NatsError.errorForCode(
           ErrorCode.JETSTREAM_NOT_ENABLED,
-          new Error(r.error.description),
+          new Error(r.error.description)
         );
       }
       throw new NatsError(r.error.description, `${r.error.code}`);
@@ -128,26 +128,38 @@ class JetStreamClientImpl extends BaseClient implements JetStreamClient {
   async publish(
     subj: string,
     data: Uint8Array,
-    opts = {} as JetStreamPubOpts,
+    ...options: JetStreamPubOption[]
   ): Promise<PubAck> {
-    const o = opts;
-    o.ttl = opts.ttl || this.timeout;
-
+    const o = {} as JetStreamPubOpts;
     const mh = headers();
-    if (o.id) {
-      mh.set(PubHeaders.MsgIdHdr, o.id);
-    }
-    if (o.lid) {
-      mh.set(PubHeaders.ExpectedLastMsgIdHdr, o.lid);
-    }
-    if (o.str) {
-      mh.set(PubHeaders.ExpectedStreamHdr, o.str);
-    }
-    if (o.seq && o.seq > 0) {
-      mh.set(PubHeaders.ExpectedLastSeqHdr, `${o.seq}`);
+    if(options) {
+      options.forEach((fn) => {
+        fn(o);
+      })
+      o.ttl = o.ttl || this.timeout;
+      if (o.id) {
+        mh.set(PubHeaders.MsgIdHdr, o.id);
+      }
+      if (o.lid) {
+        mh.set(PubHeaders.ExpectedLastMsgIdHdr, o.lid);
+      }
+      if (o.str) {
+        mh.set(PubHeaders.ExpectedStreamHdr, o.str);
+      }
+      if (o.seq && o.seq > 0) {
+        mh.set(PubHeaders.ExpectedLastSeqHdr, `${o.seq}`);
+      }
     }
 
-    const r = await this._request(subj, data, { timeout: o.ttl, headers: mh });
+    const ro = {} as RequestOptions;
+    if (o.ttl) {
+      ro.timeout = o.ttl;
+    }
+    if (options) {
+      ro.headers = mh;
+    }
+
+    const r = await this._request(subj, data, ro);
     const pa = r as PubAckResponse;
     if (pa.stream === "") {
       throw NatsError.errorForCode(ErrorCode.INVALID_JS_ACK);

@@ -6,7 +6,7 @@ export interface JetStreamClient {
   publish(
     subj: string,
     data: Uint8Array,
-    opts?: JetStreamPubOpts,
+    ...options: JetStreamPubOption[]
   ): Promise<PubAck>;
   subscribe(
     subj: string,
@@ -63,6 +63,33 @@ export interface JetStreamSubOpts {
   cfg: ConsumerConfig;
   queue?: string;
 }
+
+export type JetStreamPubOption = (opts: JetStreamPubOpts) => void;
+
+export function expectLastMsgID(id: string): JetStreamPubOption {
+  return (opts: JetStreamPubOpts) => {
+    opts.lid = id;
+  }
+}
+
+export function expectLastSequence(seq: number): JetStreamPubOption {
+  return (opts: JetStreamPubOpts) => {
+    opts.seq = seq;
+  }
+}
+
+export function expectStream(stream: string): JetStreamPubOption {
+  return (opts: JetStreamPubOpts) => {
+    opts.str = stream;
+  }
+}
+
+export function msgID(id: string): JetStreamPubOption {
+  return (opts: JetStreamPubOpts) => {
+    opts.id = id;
+  }
+}
+
 
 export type JetStreamSubOption = (opts: JetStreamSubOpts) => void;
 

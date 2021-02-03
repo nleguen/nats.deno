@@ -9,7 +9,13 @@ import {
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "../tests/helpers/asserts.ts";
 import { ErrorCode, NatsError, StringCodec } from "../nats-base-client/mod.ts";
-import { StorageType } from "../jetstream/types.ts";
+import {
+  expectLastMsgID,
+  expectLastSequence,
+  expectStream,
+  msgID,
+  StorageType,
+} from "../jetstream/types.ts";
 
 Deno.test("jetstream - jetstream not enabled", async () => {
   // start a regular server
@@ -110,7 +116,7 @@ Deno.test("jetstream - publish to existing stream", async () => {
 
   // test stream expectation
   try {
-    await njs.publish("foo", sc.encode("hello"), { str: "ORDERS" });
+    await njs.publish("foo", sc.encode("hello"), expectStream("ORDERS"));
     fail("expected error");
   } catch (err) {
     const nerr = err as NatsError;
@@ -118,25 +124,25 @@ Deno.test("jetstream - publish to existing stream", async () => {
   }
   // test last sequence expectation
   try {
-    await njs.publish("foo", sc.encode("hello"), { seq: 10 });
+    await njs.publish("foo", sc.encode("hello"), expectLastSequence(10));
     fail("expected error");
   } catch (err) {
     const nerr = err as NatsError;
     assertEquals(nerr.message, "wrong last sequence: 1");
   }
 
-  pa = await njs.publish("foo", sc.encode("hello"), { id: "ZZZ" });
+  pa = await njs.publish("foo", sc.encode("hello"), msgID("ZZZ"));
   assertEquals(pa.stream, "test");
   assertEquals(pa.seq, 2);
 
-  pa = await njs.publish("foo", sc.encode("hello"), { id: "ZZZ" });
+  pa = await njs.publish("foo", sc.encode("hello"), msgID("ZZZ"));
   assertEquals(pa.stream, "test");
   assertEquals(pa.seq, 2);
   assert(pa.duplicate);
 
   // test last id expectation
   try {
-    await njs.publish("foo", sc.encode("hello"), { lid: "AAA" });
+    await njs.publish("foo", sc.encode("hello"), expectLastMsgID("AAA"));
     fail("expected error");
   } catch (err) {
     const nerr = err as NatsError;
@@ -145,14 +151,14 @@ Deno.test("jetstream - publish to existing stream", async () => {
 
   // test last sequence
   try {
-    await njs.publish("foo", sc.encode("hello"), { seq: 22 });
+    await njs.publish("foo", sc.encode("hello"), expectLastSequence(22));
     fail("expected error");
   } catch (err) {
     const nerr = err as NatsError;
     assertEquals(nerr.message, "wrong last sequence: 2");
   }
 
-  pa = await njs.publish("foo", sc.encode("hello"), { seq: 2 });
+  pa = await njs.publish("foo", sc.encode("hello"), expectLastSequence(2));
   assertEquals(pa.stream, "test");
   assertEquals(pa.seq, 3);
   si = await jsm.streamInfo("test");
