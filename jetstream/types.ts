@@ -1,6 +1,9 @@
-import { Subscription, SubscriptionOptions } from '../nats-base-client/types.ts'
-import { NatsError } from '../nats-base-client/error.ts'
-import { MsgHdrs } from '../nats-base-client/headers.ts'
+import {
+  Subscription,
+  SubscriptionOptions,
+} from "../nats-base-client/types.ts";
+import { NatsError } from "../nats-base-client/error.ts";
+import { MsgHdrs } from "../nats-base-client/headers.ts";
 
 export interface JetStreamClient {
   publish(
@@ -69,27 +72,26 @@ export type JetStreamPubOption = (opts: JetStreamPubOpts) => void;
 export function expectLastMsgID(id: string): JetStreamPubOption {
   return (opts: JetStreamPubOpts) => {
     opts.lid = id;
-  }
+  };
 }
 
 export function expectLastSequence(seq: number): JetStreamPubOption {
   return (opts: JetStreamPubOpts) => {
     opts.seq = seq;
-  }
+  };
 }
 
 export function expectStream(stream: string): JetStreamPubOption {
   return (opts: JetStreamPubOpts) => {
     opts.str = stream;
-  }
+  };
 }
 
 export function msgID(id: string): JetStreamPubOption {
   return (opts: JetStreamPubOpts) => {
     opts.id = id;
-  }
+  };
 }
-
 
 export type JetStreamSubOption = (opts: JetStreamSubOpts) => void;
 
@@ -392,7 +394,6 @@ export interface PubAck {
 
 export interface PubAckResponse extends ApiResponse, PubAck {}
 export interface StreamInfoResponse extends ApiResponse, StreamInfo {}
-
 
 export interface JsMsg {
   subject: string;

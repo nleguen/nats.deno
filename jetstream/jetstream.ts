@@ -4,29 +4,34 @@ import type {
   ApiResponse,
   ConsumerConfig,
   ConsumerInfo,
-  ConsumerLister, DeliveryInfo,
+  ConsumerLister,
+  DeliveryInfo,
   JetStreamClient,
   JetStreamManager,
-  JetStreamOptions, JetStreamPubOption,
+  JetStreamOptions,
+  JetStreamPubOption,
   JetStreamPubOpts,
-  JetStreamSubOpts, JsMsg,
+  JetStreamSubOpts,
+  JsMsg,
   PubAck,
   PubAckResponse,
   StreamConfig,
   StreamInfo,
   StreamLister,
-} from './types.ts'
+} from "./types.ts";
 import {
   Codec,
   Empty,
   ErrorCode,
   headers,
-  JSONCodec, Msg, MsgHdrs,
+  JSONCodec,
+  Msg,
+  MsgHdrs,
   NatsConnection,
   NatsError,
   RequestOptions,
   Subscription,
-} from '../nats-base-client/mod.ts'
+} from "../nats-base-client/mod.ts";
 import { JetStreamSubOption, PubHeaders } from "./types.ts";
 
 const defaultPrefix = "$JS.API";
@@ -110,7 +115,7 @@ class BaseClient {
       if (r.error.code === 503) {
         throw NatsError.errorForCode(
           ErrorCode.JETSTREAM_NOT_ENABLED,
-          new Error(r.error.description)
+          new Error(r.error.description),
         );
       }
       throw new NatsError(r.error.description, `${r.error.code}`);
@@ -132,10 +137,10 @@ class JetStreamClientImpl extends BaseClient implements JetStreamClient {
   ): Promise<PubAck> {
     const o = {} as JetStreamPubOpts;
     const mh = headers();
-    if(options) {
+    if (options) {
       options.forEach((fn) => {
         fn(o);
-      })
+      });
       o.ttl = o.ttl || this.timeout;
       if (o.id) {
         mh.set(PubHeaders.MsgIdHdr, o.id);
@@ -248,7 +253,6 @@ class JetStreamManagerImpl extends BaseClient implements JetStreamManager {
     return Promise.reject();
   }
 }
-
 
 const ACK = Uint8Array.of(43, 65, 67, 75);
 const NAK = Uint8Array.of(45, 78, 65, 75);
