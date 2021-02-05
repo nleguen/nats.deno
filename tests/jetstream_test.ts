@@ -12,7 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { JetStreamConfig, NatsServer } from './helpers/launcher.ts';
+import { JetStreamConfig, NatsServer } from "./helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
 import {
   expectLastMsgID,
@@ -29,7 +29,7 @@ import {
   assertEquals,
   fail,
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
-import { assertErrorCode } from './helpers/asserts.ts';
+import { assertErrorCode } from "./helpers/asserts.ts";
 import { ErrorCode, NatsError, StringCodec } from "../nats-base-client/mod.ts";
 
 Deno.test("jetstream - jetstream not enabled", async () => {

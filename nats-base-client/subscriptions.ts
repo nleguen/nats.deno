@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 /*
  * Copyright 2020-2021 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,39 +19,39 @@ import type { Msg } from "./types.ts";
 
 export class Subscriptions {
   mux!: SubscriptionImpl<Msg>;
-  subs: Map<number, SubscriptionImpl<unknown>>;
+  subs: Map<number, SubscriptionImpl<any>>;
   sidCounter: number;
 
   constructor() {
     this.sidCounter = 0;
-    this.subs = new Map<number, SubscriptionImpl<unknown>>();
+    this.subs = new Map<number, SubscriptionImpl<any>>();
   }
 
   size(): number {
     return this.subs.size;
   }
 
-  add(s: SubscriptionImpl<unknown>): SubscriptionImpl<unknown> {
+  add(s: SubscriptionImpl<any>): SubscriptionImpl<any> {
     this.sidCounter++;
     s.sid = this.sidCounter;
     this.subs.set(s.sid, s);
     return s;
   }
 
-  setMux(s: SubscriptionImpl<unknown>): SubscriptionImpl<unknown> {
+  setMux(s: SubscriptionImpl<any>): SubscriptionImpl<any> {
     this.mux = s;
     return s;
   }
 
-  getMux(): SubscriptionImpl<unknown> | null {
+  getMux(): SubscriptionImpl<any> | null {
     return this.mux;
   }
 
-  get(sid: number): (SubscriptionImpl<unknown> | undefined) {
+  get(sid: number): (SubscriptionImpl<any> | undefined) {
     return this.subs.get(sid);
   }
 
-  all(): SubscriptionImpl<unknown>[] {
+  all(): SubscriptionImpl<any>[] {
     const buf = [];
     for (const s of this.subs.values()) {
       buf.push(s);
@@ -58,7 +59,7 @@ export class Subscriptions {
     return buf;
   }
 
-  cancel(s: SubscriptionImpl<unknown>): void {
+  cancel(s: SubscriptionImpl<any>): void {
     if (s) {
       s.close();
       this.subs.delete(s.sid);

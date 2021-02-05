@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any
 /*
  * Copyright 2018-2021 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -361,7 +362,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       return;
     }
 
-    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl<unknown>;
+    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl<any>;
     if (!sub) {
       return;
     }
@@ -564,7 +565,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return r;
   }
 
-  subscribe(s: SubscriptionImpl<unknown>): Subscription<unknown> {
+  subscribe(s: SubscriptionImpl<any>): Subscription<any> {
     this.subscriptions.add(s);
     if (s.queue) {
       this.sendCommand(`SUB ${s.subject} ${s.queue} ${s.sid}\r\n`);
@@ -577,14 +578,14 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return s;
   }
 
-  unsubscribe(s: SubscriptionImpl<unknown>, max?: number) {
+  unsubscribe(s: SubscriptionImpl<any>, max?: number) {
     this.unsub(s, max);
     if (s.max === undefined || s.received >= s.max) {
       this.subscriptions.cancel(s);
     }
   }
 
-  unsub(s: SubscriptionImpl<unknown>, max?: number) {
+  unsub(s: SubscriptionImpl<any>, max?: number) {
     if (!s || this.isClosed()) {
       return;
     }
@@ -608,7 +609,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   sendSubscriptions() {
     const cmds: string[] = [];
     this.subscriptions.all().forEach((s) => {
-      const sub = s as SubscriptionImpl<unknown>;
+      const sub = s as SubscriptionImpl<any>;
       if (sub.queue) {
         cmds.push(`SUB ${sub.subject} ${sub.queue} ${sub.sid}${CR_LF}`);
       } else {

@@ -47,6 +47,7 @@ import { JsSubscriptionImpl, PullSubscription } from "./jssub.ts";
 import { createInbox } from "../protocol.ts";
 import { JsMsgImpl } from "./jsmsg.ts";
 import { NatsConnectionImpl } from "../nats.ts";
+import { SubscriptionImpl } from "../subscription.ts";
 
 export class BaseJsClient {
   nc: NatsConnection;
@@ -313,6 +314,7 @@ export class JetStreamClientImpl extends BaseJsClient
       o,
       manualAcks,
     );
-    return nci.protocol.subscribe(sub) as JsSubscriptionImpl<JsMsg>;
+    const sx = sub as SubscriptionImpl<unknown>;
+    return nci.protocol.subscribe(sx) as JsSubscriptionImpl<JsMsg>;
   }
 }
