@@ -21,8 +21,8 @@ import {
   ConsumerListResponse,
   CreateConsumerRequest,
   DeleteMsgRequest,
-  JetStreamManager,
   JetStreamOptions,
+  JSM,
   Lister,
   StreamConfig,
   StreamInfo,
@@ -31,13 +31,12 @@ import {
   StreamNames,
   SuccessResponse,
   validateDurableName,
-} from "./types.ts";
+} from "./jstypes.ts";
 import { Empty, NatsConnection } from "../nats-base-client/types.ts";
-import { ListerFieldFilter, ListerImpl } from "./lister.ts";
-import { BaseClient } from "./baseclient.ts";
+import { ListerFieldFilter, ListerImpl } from "./jslister.ts";
+import { BaseJsClient } from "./jsclient.ts";
 
-export class JetStreamManagerImpl extends BaseClient
-  implements JetStreamManager {
+export class JetStreamManagerImpl extends BaseJsClient implements JSM {
   constructor(nc: NatsConnection, opts?: JetStreamOptions) {
     super(nc, opts);
   }

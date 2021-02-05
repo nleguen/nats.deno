@@ -1,6 +1,6 @@
 import { JetStreamConfig, NatsServer } from "../tests/helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
-import { JetStream, JSM } from "../jetstream/jetstream.ts";
+import { JetStream, JetStreamManager } from "../jetstream/jetstream.ts";
 
 import {
   assert,
@@ -15,7 +15,7 @@ import {
   expectStream,
   msgID,
   StorageType,
-} from "../jetstream/types.ts";
+} from "../jetstream/jstypes.ts";
 
 Deno.test("jetstream - jetstream not enabled", async () => {
   // start a regular server
@@ -103,7 +103,7 @@ Deno.test("jetstream - publish to existing stream", async () => {
     { port: ns.port, noResponders: true, headers: true },
   );
   const njs = await JetStream(nc);
-  const jsm = await JSM(nc);
+  const jsm = await JetStreamManager(nc);
   let si = await jsm.addStream(
     { name: "test", subjects: ["foo", "bar", "baz"] },
   );

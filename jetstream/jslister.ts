@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { ApiPaged, Lister, PagedOffset } from "./types.ts";
+import { ApiPaged, Lister, PagedOffset } from "./jstypes.ts";
 import { JetStreamManagerImpl } from "./jsm.ts";
 
 export type ListerFieldFilter<T> = (v: unknown) => T[];

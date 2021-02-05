@@ -13,42 +13,16 @@
  * limitations under the License.
  */
 
-import type {
-  ConsumerConfig,
-  ConsumerInfo,
-  JetStreamClient,
-  JetStreamManager,
-  JetStreamOptions,
-  JetStreamPubOption,
-  JetStreamPubOpts,
-  JetStreamSubOptions,
-  JetStreamSubOpts,
-  PubAck,
-  PubAckResponse,
-} from "./types.ts";
+import type { JetStreamClient, JetStreamOptions, JSM } from "./jstypes.ts";
+
 import {
-  AckPolicy,
-  DeliverPolicy,
-  JetStreamSubOption,
-  JsMsg,
-  PubHeaders,
-  ReplayPolicy,
-} from "./types.ts";
-import {
-  createInbox,
   ErrorCode,
-  headers,
   NatsConnection,
   NatsError,
-  RequestOptions,
-  SubscriptionOptions,
 } from "../nats-base-client/mod.ts";
 
 import { JetStreamManagerImpl } from "./jsm.ts";
-import { BaseClient } from "./baseclient.ts";
-import { NatsConnectionImpl } from "../nats-base-client/nats.ts";
-import { JsMsgImpl } from "./jsmsg.ts";
-import { JsSubscriptionImpl, PullSubscription } from "./jssub.ts";
+import { JetStreamClientImpl } from "./jsclient.ts";
 
 export const defaultPrefix = "$JS.API";
 export const defaultTimeout = 5000;
@@ -59,15 +33,15 @@ export async function JetStream(
 ): Promise<JetStreamClient> {
   const ctx = new JetStreamClientImpl(nc, opts);
   if (!ctx.opts.direct) {
-    ctx.jsm = await JSM(nc, opts);
+    ctx.jsm = await JetStreamManager(nc, opts);
   }
   return ctx;
 }
 
-export async function JSM(
+export async function JetStreamManager(
   nc: NatsConnection,
   opts: JetStreamOptions = {},
-): Promise<JetStreamManager> {
+): Promise<JSM> {
   const adm = new JetStreamManagerImpl(nc, opts);
   try {
     await adm.getAccountInfo();
@@ -79,217 +53,4 @@ export async function JSM(
     throw ne;
   }
   return adm;
-}
-
-export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
-  jsm?: JetStreamManager;
-  constructor(nc: NatsConnection, opts?: JetStreamOptions) {
-    super(nc, opts);
-  }
-
-  async publish(
-    subj: string,
-    data: Uint8Array,
-    ...options: JetStreamPubOption[]
-  ): Promise<PubAck> {
-    const o = {} as JetStreamPubOpts;
-    const mh = headers();
-    if (options) {
-      options.forEach((fn) => {
-        fn(o);
-      });
-      o.ttl = o.ttl || this.timeout;
-      if (o.id) {
-        mh.set(PubHeaders.MsgIdHdr, o.id);
-      }
-      if (o.lid) {
-        mh.set(PubHeaders.ExpectedLastMsgIdHdr, o.lid);
-      }
-      if (o.str) {
-        mh.set(PubHeaders.ExpectedStreamHdr, o.str);
-      }
-      if (o.seq && o.seq > 0) {
-        mh.set(PubHeaders.ExpectedLastSeqHdr, `${o.seq}`);
-      }
-    }
-
-    const ro = {} as RequestOptions;
-    if (o.ttl) {
-      ro.timeout = o.ttl;
-    }
-    if (options) {
-      ro.headers = mh;
-    }
-
-    const r = await this._request(subj, data, ro);
-    const pa = r as PubAckResponse;
-    if (pa.stream === "") {
-      throw NatsError.errorForCode(ErrorCode.INVALID_JS_ACK);
-    }
-    return pa;
-  }
-
-  async attach(subj: string, ...jsopts: JetStreamSubOption[]) {
-  }
-
-  _initSubOpts(
-    args = {} as JetStreamSubOptions,
-    ...options: JetStreamSubOption[]
-  ): JetStreamSubOpts {
-    const opts = {} as JetStreamSubOpts;
-    opts.name = args.name ? args.name : "";
-    opts.stream = args.stream ? args.stream : "";
-    opts.consumer = args.consumer ? args.consumer : "";
-    opts.pull = args.pull ? args.pull : 0;
-    opts.mack = args.mack ? args.mack : false;
-    opts.cfg = args.cfg ? args.cfg : {} as ConsumerConfig;
-    opts.queue = args.queue ? args.queue : "";
-    opts.callback = args.callback ? args.callback : undefined;
-    opts.max = args.max ? args.max : 0;
-
-    opts.cfg.deliver_policy = opts.cfg.deliver_policy || DeliverPolicy.All;
-    opts.cfg.replay_policy = opts.cfg.replay_policy || ReplayPolicy.Instant;
-
-    opts.cfg.ack_policy = args && args.cfg && args.cfg.ack_policy
-      ? opts.cfg.ack_policy
-      : AckPolicy.NotSet;
-    options.forEach((fn) => {
-      fn(opts);
-    });
-    return opts;
-  }
-
-  async subscribe(
-    subj: string,
-    opts = {} as JetStreamSubOptions,
-    ...options: JetStreamSubOption[]
-  ): Promise<PullSubscription<JsMsg>> {
-    const o = this._initSubOpts(opts, ...options);
-
-    let pullMode = o.pull > 0;
-
-    let stream = o.stream;
-    let consumer = o.consumer;
-    let attached = false;
-    let deliver = createInbox();
-
-    let ccfg: ConsumerConfig;
-    let shouldCreate = false;
-    const requiresApi = stream !== "" &&
-      (consumer !== "" || o.cfg.deliver_subject !== "");
-
-    if (this.opts.direct && requiresApi) {
-      throw new Error("direct mode requires direct pull or push");
-    }
-
-    if (this.opts.direct) {
-      if (o.cfg.deliver_subject) {
-        deliver = o.cfg.deliver_subject;
-      }
-    } else {
-      if (!this.jsm) {
-        throw new Error("no jsm when trying to attach");
-      }
-      const jsm = this.jsm;
-      stream = await jsm.streamNameBySubject(subj);
-      let info: ConsumerInfo;
-      consumer = o.cfg.durable_name || "";
-      if (consumer) {
-        info = await jsm.consumerInfo(stream, consumer);
-        ccfg = info.config;
-        attached = true;
-
-        if (ccfg.filter_subject && subj != ccfg.filter_subject) {
-          throw new Error("subject doesn't match consumer");
-        }
-        if (ccfg.deliver_subject) {
-          deliver = ccfg.deliver_subject;
-        }
-      } else {
-        shouldCreate = true;
-        if (!pullMode) {
-          o.cfg.deliver_subject = deliver;
-        }
-        o.cfg.filter_subject = subj;
-      }
-      if (!this.jsm) {
-        throw new Error("no jsm when trying to create a stream");
-      }
-    }
-    const sub = this._subscribe(deliver, o.mack, o);
-
-    if (shouldCreate) {
-      if (!this.jsm) {
-        throw new Error("no jsm when trying to create a stream");
-      }
-      const jsm = this.jsm;
-
-      if (o.cfg.ack_policy === AckPolicy.NotSet) {
-        o.cfg.ack_policy = AckPolicy.Explicit;
-      }
-      const isDurable = o.cfg.deliver_subject !== "";
-      try {
-        const ci = await jsm.addConsumer(stream, o.cfg);
-        sub.info.stream = ci.stream_name;
-        sub.info.consumer = ci.name;
-        sub.info.deliver = ci.config.deliver_subject;
-        sub.info.durable = isDurable;
-      } catch (err) {
-        console.log("ZONK", err);
-        sub.unsubscribe();
-        throw err;
-      }
-    } else {
-      sub.info.stream = stream;
-      sub.info.consumer = consumer;
-      sub.info.deliver = this.opts.direct ? o.cfg.deliver_subject : deliver;
-    }
-
-    sub.info.attached = attached;
-
-    if (o.pull > 0) {
-      const psub = sub as PullSubscription<JsMsg>;
-      sub.info.pull = o.pull;
-      psub.pull();
-    }
-
-    return sub as PullSubscription<JsMsg>;
-  }
-
-  _subscribe(
-    subject: string,
-    manualAcks: boolean,
-    opts: JetStreamSubOptions = {},
-  ): JsSubscriptionImpl<JsMsg> {
-    if (this.nc.isClosed()) {
-      throw NatsError.errorForCode(ErrorCode.CONNECTION_CLOSED);
-    }
-    if (this.nc.isDraining()) {
-      throw NatsError.errorForCode(ErrorCode.CONNECTION_DRAINING);
-    }
-    subject = subject || "";
-    if (subject.length === 0) {
-      throw NatsError.errorForCode(ErrorCode.BAD_SUBJECT);
-    }
-
-    const o = {} as SubscriptionOptions;
-    const cb = opts.callback;
-    if (cb) {
-      o.callback = (err, msg) => {
-        cb(err, new JsMsgImpl(msg, subject));
-      };
-    }
-    o.queue = opts.queue;
-    o.max = opts.max;
-
-    const nci = this.nc as NatsConnectionImpl;
-    const sub = new JsSubscriptionImpl<JsMsg>(
-      nci,
-      subject,
-      this.prefix,
-      o,
-      manualAcks,
-    );
-    return nci.protocol.subscribe(sub) as JsSubscriptionImpl<JsMsg>;
-  }
 }

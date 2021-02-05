@@ -1,6 +1,6 @@
 import { JetStreamConfig, NatsServer } from "../tests/helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
-import { JetStream, JSM } from "../jetstream/jetstream.ts";
+import { JetStream, JetStreamManager } from "../jetstream/jetstream.ts";
 import {
   assert,
   assertEquals,
@@ -9,16 +9,20 @@ import {
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "../tests/helpers/mod.ts";
 import { ErrorCode, StringCodec } from "../nats-base-client/mod.ts";
-import { AckPolicy, JsMsg, PubAck, StreamConfig } from "../jetstream/types.ts";
+import {
+  AckPolicy,
+  JsMsg,
+  PubAck,
+  StreamConfig,
+} from "../jetstream/jstypes.ts";
 import { nuid } from "../nats-base-client/nuid.ts";
-import { delay } from "../nats-base-client/util.ts";
 
 Deno.test("jsm - create", async () => {
   const ns = await NatsServer.start(JetStreamConfig({}, true));
   const nc = await connect(
     { port: ns.port, noResponders: true, headers: true },
   );
-  const jsm = await JSM(nc);
+  const jsm = await JetStreamManager(nc);
   const ai = await jsm.getAccountInfo();
   assert(ai.limits.max_memory > 0);
   await nc.close();
@@ -43,7 +47,7 @@ Deno.test("jsm - account not enabled", async () => {
     { port: ns.port, noResponders: true, headers: true, user: "a", pass: "a" },
   );
   try {
-    await JSM(a);
+    await JetStreamManager(a);
   } catch (err) {
     fail("expected a to have jetstream support");
   }
@@ -52,7 +56,7 @@ Deno.test("jsm - account not enabled", async () => {
     { port: ns.port, noResponders: true, headers: true, user: "b", pass: "b" },
   );
   try {
-    await JSM(b);
+    await JetStreamManager(b);
     fail("expected b to fail");
   } catch (err) {
     assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
@@ -68,7 +72,7 @@ Deno.test("jsm - stream management", async () => {
   const nc = await connect(
     { port: ns.port, noResponders: true, headers: true },
   );
-  const jsm = await JSM(nc);
+  const jsm = await JetStreamManager(nc);
   try {
     const _ = await jsm.addStream({} as StreamConfig);
     fail("expected empty config to fail");
@@ -176,7 +180,7 @@ Deno.test("jetstream - subscribe", async () => {
     { port: ns.port, noResponders: true, headers: true },
   );
 
-  const jsm = await JSM(nc);
+  const jsm = await JetStreamManager(nc);
   const js = await JetStream(nc);
 
   await jsm.addStream(

@@ -30,7 +30,7 @@ export interface JetStreamClient {
   ): Promise<PullSubscription<JsMsg>>;
 }
 
-export interface JetStreamManager {
+export interface JSM {
   // Create a stream.
   addStream(cfg: StreamConfig): Promise<StreamInfo>;
   // Update a stream

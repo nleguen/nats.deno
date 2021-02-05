@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { DeliveryInfo, JsMsg } from "./types.ts";
+import { DeliveryInfo, JsMsg } from "./jstypes.ts";
 import { Msg } from "../nats-base-client/types.ts";
 import { MsgHdrs } from "../nats-base-client/headers.ts";
 

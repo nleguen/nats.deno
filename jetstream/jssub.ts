@@ -14,7 +14,7 @@
  */
 
 import { NatsError } from "../nats-base-client/error.ts";
-import { JsMsg, NextRequest } from "./types.ts";
+import { JsMsg, NextRequest } from "./jstypes.ts";
 import {
   Msg,
   NatsConnection,
