@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 import {
+  BaseMsg,
   ConnectionOptions,
   DebugEvents,
   DEFAULT_MAX_PING_OUT,
@@ -20,6 +21,7 @@ import {
   DEFAULT_RECONNECT_TIME_WAIT,
   Empty,
   Events,
+  Msg,
   PublishOptions,
   ServerInfo,
   Status,
@@ -359,7 +361,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       return;
     }
 
-    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl;
+    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl<any>;
     if (!sub) {
       return;
     }
@@ -562,7 +564,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return r;
   }
 
-  subscribe(s: SubscriptionImpl): Subscription {
+  subscribe(s: SubscriptionImpl<any>): Subscription<any> {
     this.subscriptions.add(s);
     if (s.queue) {
       this.sendCommand(`SUB ${s.subject} ${s.queue} ${s.sid}\r\n`);
@@ -575,14 +577,14 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return s;
   }
 
-  unsubscribe(s: SubscriptionImpl, max?: number) {
+  unsubscribe(s: SubscriptionImpl<any>, max?: number) {
     this.unsub(s, max);
     if (s.max === undefined || s.received >= s.max) {
       this.subscriptions.cancel(s);
     }
   }
 
-  unsub(s: SubscriptionImpl, max?: number) {
+  unsub(s: SubscriptionImpl<any>, max?: number) {
     if (!s || this.isClosed()) {
       return;
     }
@@ -606,7 +608,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   sendSubscriptions() {
     const cmds: string[] = [];
     this.subscriptions.all().forEach((s) => {
-      const sub = s as SubscriptionImpl;
+      const sub = s as SubscriptionImpl<any>;
       if (sub.queue) {
         cmds.push(`SUB ${sub.subject} ${sub.queue} ${sub.sid}${CR_LF}`);
       } else {
@@ -648,7 +650,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   drain(): Promise<void> {
     const subs = this.subscriptions.all();
     const promises: Promise<void>[] = [];
-    subs.forEach((sub: Subscription) => {
+    subs.forEach((sub: Subscription<BaseMsg>) => {
       promises.push(sub.drain());
     });
     return Promise.all(promises)
@@ -678,7 +680,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     if (!mux) {
       const inbox = this.muxSubscriptions.init();
       // dot is already part of mux
-      const sub = new SubscriptionImpl(this, `${inbox}*`);
+      const sub = new SubscriptionImpl<Msg>(this, `${inbox}*`);
       sub.callback = this.muxSubscriptions.dispatcher();
       this.subscriptions.setMux(sub);
       this.subscribe(sub);

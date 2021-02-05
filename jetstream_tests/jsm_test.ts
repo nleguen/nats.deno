@@ -11,7 +11,7 @@ import { assertErrorCode } from "../tests/helpers/mod.ts";
 import { ErrorCode, StringCodec } from "../nats-base-client/mod.ts";
 import { AckPolicy, JsMsg, PubAck, StreamConfig } from "../jetstream/types.ts";
 import { nuid } from "../nats-base-client/nuid.ts";
-import { delay } from '../nats-base-client/util.ts'
+import { delay } from "../nats-base-client/util.ts";
 
 Deno.test("jsm - create", async () => {
   const ns = await NatsServer.start(JetStreamConfig({}, true));
@@ -169,9 +169,11 @@ Deno.test("jsm - stream management", async () => {
 });
 
 Deno.test("jetstream - subscribe", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({debug: true, trace: true}, true));
+  const ns = await NatsServer.start(
+    JetStreamConfig({}, true),
+  );
   const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true, debug: true },
+    { port: ns.port, noResponders: true, headers: true },
   );
 
   const jsm = await JSM(nc);
@@ -193,9 +195,9 @@ Deno.test("jetstream - subscribe", async () => {
   assertEquals(si.state.messages, 15);
 
   const msgs: JsMsg[] = [];
-  const sub = await js.subscribe("foo.C", { max: 5});
+  const sub = await js.subscribe("foo.C", { max: 5 });
   const done = (async () => {
-    for await(const m of sub) {
+    for await (const m of sub) {
       msgs.push(m);
     }
   })();

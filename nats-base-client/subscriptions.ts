@@ -14,43 +14,43 @@
  */
 import type { SubscriptionImpl } from "./subscription.ts";
 import type { NatsError } from "./error.ts";
-import type { Msg } from "./types.ts";
+import type { BaseMsg, Msg, Subscription } from "./types.ts";
 
 export class Subscriptions {
-  mux!: SubscriptionImpl;
-  subs: Map<number, SubscriptionImpl>;
+  mux!: SubscriptionImpl<Msg>;
+  subs: Map<number, SubscriptionImpl<any>>;
   sidCounter: number;
 
   constructor() {
     this.sidCounter = 0;
-    this.subs = new Map<number, SubscriptionImpl>();
+    this.subs = new Map<number, SubscriptionImpl<any>>();
   }
 
   size(): number {
     return this.subs.size;
   }
 
-  add(s: SubscriptionImpl): SubscriptionImpl {
+  add(s: SubscriptionImpl<any>): SubscriptionImpl<any> {
     this.sidCounter++;
     s.sid = this.sidCounter;
-    this.subs.set(s.sid, s as SubscriptionImpl);
+    this.subs.set(s.sid, s);
     return s;
   }
 
-  setMux(s: SubscriptionImpl): SubscriptionImpl {
+  setMux(s: SubscriptionImpl<any>): SubscriptionImpl<any> {
     this.mux = s;
     return s;
   }
 
-  getMux(): SubscriptionImpl | null {
+  getMux(): SubscriptionImpl<any> | null {
     return this.mux;
   }
 
-  get(sid: number): (SubscriptionImpl | undefined) {
+  get(sid: number): (SubscriptionImpl<any> | undefined) {
     return this.subs.get(sid);
   }
 
-  all(): (SubscriptionImpl)[] {
+  all(): SubscriptionImpl<any>[] {
     const buf = [];
     for (const s of this.subs.values()) {
       buf.push(s);
@@ -58,7 +58,7 @@ export class Subscriptions {
     return buf;
   }
 
-  cancel(s: SubscriptionImpl): void {
+  cancel(s: SubscriptionImpl<any>): void {
     if (s) {
       s.close();
       this.subs.delete(s.sid);

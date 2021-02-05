@@ -14,130 +14,79 @@
  */
 
 import { NatsError } from "../nats-base-client/error.ts";
-import {
-  ConsumerInfo,
-  JetStreamClient, JetStreamSubOptions,
-  JetStreamSubOpts,
-  JsMsg,
-  NextRequest,
-} from './types.ts'
+import { JsMsg, NextRequest } from "./types.ts";
 import {
   Msg,
   NatsConnection,
   Subscription,
   SubscriptionOptions,
 } from "../nats-base-client/types.ts";
-import { QueuedIterator } from "../nats-base-client/queued_iterator.ts";
-import { JsMsgImpl } from './jsm.ts'
-import { JetStreamClientImpl } from './jetstream.ts'
-
-export interface JsSubscriptionOptions {
-  queue: string;
-  callback?: JsCallback;
-}
+import { SubscriptionImpl } from "../nats-base-client/subscription.ts";
+import { NatsConnectionImpl } from "../nats-base-client/nats.ts";
+import { JsMsgImpl } from "./jsmsg.ts";
+import { Codec, JSONCodec } from "../nats-base-client/mod.ts";
 
 export type JsCallback = (err: NatsError | null, msg: JsMsg) => void;
-
-export interface JsSubscription extends AsyncIterable<JsMsg> {
-  unsubscribe(max?: number): void;
-  drain(): Promise<void>;
-  isDraining(): boolean;
-  isClosed(): boolean;
-  callback(err: NatsError | null, msg: Msg): void;
-  getSubject(): string;
-  getReceived(): number;
-  getProcessed(): number;
-  getPending(): number;
-  getID(): number;
-  getMax(): number | undefined;
-  pull(): void;
-}
 
 export interface SubConsumerInfo {
   stream?: string;
   consumer?: string;
   deliver?: string;
-  durable?: boolean
+  durable?: boolean;
   pull?: number;
   attached?: boolean;
 }
 
-export class JsSubscriptionImpl extends QueuedIterator<JsMsg>
-  implements JsSubscription {
-  js: JetStreamClientImpl;
-  sub: Subscription;
-  subject: string;
+export interface PullSubscription<T> extends Subscription<T> {
+  pull(): void;
+}
+
+export class JsSubscriptionImpl<T> extends SubscriptionImpl<T>
+  implements PullSubscription<T> {
+  nc: NatsConnection;
   info: SubConsumerInfo;
+  prefix: string;
+  jc?: Codec<unknown>;
 
   constructor(
-    js: JetStreamClientImpl,
+    nc: NatsConnectionImpl,
     subject: string,
-    opts: JetStreamSubOpts,
+    prefix: string,
+    opts: SubscriptionOptions,
+    manualAcks: boolean,
   ) {
-    super();
-    this.js = js;
-    this.subject = subject;
+    super(nc.protocol, subject, opts);
+    this.nc = nc;
+    this.prefix = prefix;
     this.info = {} as SubConsumerInfo; //setup later
 
-    if (!opts.mack) {
-      this.postYield = (m: JsMsg): void => {
-        m.ack();
+    if (!manualAcks) {
+      this.postYield = (m: T): void => {
+        const um = m as unknown;
+        const jm = um as JsMsg;
+        jm.ack();
       };
     }
-    const o = {} as SubscriptionOptions;
-    const cb = opts.callback;
-    if (cb) {
-      o.callback = (err, msg) => {
-        cb(err, new JsMsgImpl(msg, this.subject));
-      }
-    } else {
-      o.callback = (err, msg) => {
-        err ? this.stop(err) : this.push(new JsMsgImpl(msg, this.subject));
-      };
-    }
-    o.queue = opts.queue;
-    o.max = opts.max;
-    this.sub = this.js.nc.subscribe(this.subject, o);
   }
 
-  callback(err: NatsError | null, msg: Msg): void {}
-
-  drain(): Promise<void> {
-    return this.sub.drain();
-  }
-
-  getID(): number {
-    return this.sub.getID();
-  }
-
-  getMax(): number | undefined {
-    return this.sub.getMax();
-  }
-
-  getSubject(): string {
-    return this.sub.getSubject();
-  }
-
-  isClosed(): boolean {
-    return this.sub.isClosed();
-  }
-
-  isDraining(): boolean {
-    return this.sub.isDraining();
-  }
-
-  unsubscribe(max?: number): void {
-    return this.sub.unsubscribe(max);
+  callback(err: NatsError | null, msg: Msg): void {
+    this.cancelTimeout();
+    const u = new JsMsgImpl(msg, this.subject) as unknown;
+    const jm = u as T;
+    err ? this.stop(err) : this.push(jm);
   }
 
   pull(): void {
     if (!this.info.deliver || this.info.pull === 0) {
       throw new Error("not a pull subscription");
     }
+    if (!this.jc) {
+      this.jc = JSONCodec();
+    }
     const d = { batch: this.info.pull } as NextRequest;
-    this.js.nc.publish(
-      `${this.js.prefix}.CONSUMER.NEXT.${this.info.stream}.${this.info.consumer}`,
-      this.js.jc.encode(d),
+    this.nc.publish(
+      `${this.prefix}.CONSUMER.NEXT.${this.info.stream}.${this.info.consumer}`,
+      this.jc.encode(d),
       { reply: this.subject },
     );
   }

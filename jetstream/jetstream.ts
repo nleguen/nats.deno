@@ -25,13 +25,30 @@ import type {
   JetStreamSubOpts,
   PubAck,
   PubAckResponse,
-} from './types.ts'
-import { AckPolicy, DeliverPolicy, JetStreamSubOption, PubHeaders, ReplayPolicy } from './types.ts'
-import { createInbox, ErrorCode, headers, NatsConnection, NatsError, RequestOptions, } from '../nats-base-client/mod.ts'
+} from "./types.ts";
+import {
+  AckPolicy,
+  DeliverPolicy,
+  JetStreamSubOption,
+  JsMsg,
+  PubHeaders,
+  ReplayPolicy,
+} from "./types.ts";
+import {
+  createInbox,
+  ErrorCode,
+  headers,
+  NatsConnection,
+  NatsError,
+  RequestOptions,
+  SubscriptionOptions,
+} from "../nats-base-client/mod.ts";
 
-import { JetStreamManagerImpl } from './jsm.ts'
-import { BaseClient } from './baseclient.ts'
-import { JsSubscription, JsSubscriptionImpl } from './jssub.ts'
+import { JetStreamManagerImpl } from "./jsm.ts";
+import { BaseClient } from "./baseclient.ts";
+import { NatsConnectionImpl } from "../nats-base-client/nats.ts";
+import { JsMsgImpl } from "./jsmsg.ts";
+import { JsSubscriptionImpl, PullSubscription } from "./jssub.ts";
 
 export const defaultPrefix = "$JS.API";
 export const defaultTimeout = 5000;
@@ -62,10 +79,6 @@ export async function JSM(
     throw ne;
   }
   return adm;
-}
-
-interface reqOpts {
-  template: string;
 }
 
 export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
@@ -150,7 +163,7 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
     subj: string,
     opts = {} as JetStreamSubOptions,
     ...options: JetStreamSubOption[]
-  ): Promise<JsSubscription> {
+  ): Promise<PullSubscription<JsMsg>> {
     const o = this._initSubOpts(opts, ...options);
 
     let pullMode = o.pull > 0;
@@ -162,8 +175,8 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
 
     let ccfg: ConsumerConfig;
     let shouldCreate = false;
-    const requiresApi = stream !== "" && (consumer !== "" || o.cfg.deliver_subject !== "");
-
+    const requiresApi = stream !== "" &&
+      (consumer !== "" || o.cfg.deliver_subject !== "");
 
     if (this.opts.direct && requiresApi) {
       throw new Error("direct mode requires direct pull or push");
@@ -181,10 +194,10 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
       stream = await jsm.streamNameBySubject(subj);
       let info: ConsumerInfo;
       consumer = o.cfg.durable_name || "";
-      if(consumer) {
+      if (consumer) {
         info = await jsm.consumerInfo(stream, consumer);
         ccfg = info.config;
-        attached = true
+        attached = true;
 
         if (ccfg.filter_subject && subj != ccfg.filter_subject) {
           throw new Error("subject doesn't match consumer");
@@ -203,8 +216,7 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
         throw new Error("no jsm when trying to create a stream");
       }
     }
-
-    const sub = new JsSubscriptionImpl(this, deliver, o);
+    const sub = this._subscribe(deliver, o.mack, o);
 
     if (shouldCreate) {
       if (!this.jsm) {
@@ -223,7 +235,7 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
         sub.info.deliver = ci.config.deliver_subject;
         sub.info.durable = isDurable;
       } catch (err) {
-        console.log("ZONK", err)
+        console.log("ZONK", err);
         sub.unsubscribe();
         throw err;
       }
@@ -236,10 +248,48 @@ export class JetStreamClientImpl extends BaseClient implements JetStreamClient {
     sub.info.attached = attached;
 
     if (o.pull > 0) {
+      const psub = sub as PullSubscription<JsMsg>;
       sub.info.pull = o.pull;
-      sub.pull();
+      psub.pull();
     }
 
-    return sub;
+    return sub as PullSubscription<JsMsg>;
+  }
+
+  _subscribe(
+    subject: string,
+    manualAcks: boolean,
+    opts: JetStreamSubOptions = {},
+  ): JsSubscriptionImpl<JsMsg> {
+    if (this.nc.isClosed()) {
+      throw NatsError.errorForCode(ErrorCode.CONNECTION_CLOSED);
+    }
+    if (this.nc.isDraining()) {
+      throw NatsError.errorForCode(ErrorCode.CONNECTION_DRAINING);
+    }
+    subject = subject || "";
+    if (subject.length === 0) {
+      throw NatsError.errorForCode(ErrorCode.BAD_SUBJECT);
+    }
+
+    const o = {} as SubscriptionOptions;
+    const cb = opts.callback;
+    if (cb) {
+      o.callback = (err, msg) => {
+        cb(err, new JsMsgImpl(msg, subject));
+      };
+    }
+    o.queue = opts.queue;
+    o.max = opts.max;
+
+    const nci = this.nc as NatsConnectionImpl;
+    const sub = new JsSubscriptionImpl<JsMsg>(
+      nci,
+      subject,
+      this.prefix,
+      o,
+      manualAcks,
+    );
+    return nci.protocol.subscribe(sub) as JsSubscriptionImpl<JsMsg>;
   }
 }

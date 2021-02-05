@@ -60,7 +60,7 @@ export interface NatsConnection {
   closed(): Promise<void | Error>;
   close(): Promise<void>;
   publish(subject: string, data?: Uint8Array, options?: PublishOptions): void;
-  subscribe(subject: string, opts?: SubscriptionOptions): Subscription;
+  subscribe(subject: string, opts?: SubscriptionOptions): Subscription<Msg>;
   request(
     subject: string,
     data?: Uint8Array,
@@ -111,13 +111,15 @@ export interface TlsOptions {
   keyFile?: string;
 }
 
-export interface Msg {
+export interface BaseMsg {
   subject: string;
   sid: number;
   reply?: string;
   data: Uint8Array;
   headers?: MsgHdrs;
+}
 
+export interface Msg extends BaseMsg {
   respond(data?: Uint8Array, opts?: PublishOptions): boolean;
 }
 
@@ -128,7 +130,7 @@ export interface SubscriptionOptions {
   callback?: (err: NatsError | null, msg: Msg) => void;
 }
 
-export interface Base {
+export interface Base<T> {
   subject: string;
   callback: (error: NatsError | null, msg: Msg) => void;
   received: number;
@@ -173,7 +175,7 @@ export interface ServersChanged {
   readonly deleted: string[];
 }
 
-export interface Subscription extends AsyncIterable<Msg> {
+export interface Subscription<T> extends AsyncIterable<T> {
   unsubscribe(max?: number): void;
   drain(): Promise<void>;
   isDraining(): boolean;

@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-import { MsgHdrs } from "../nats-base-client/headers.ts";
 import { NatsError } from "../nats-base-client/error.ts";
-import { JsSubscription } from './jssub.ts'
+import { BaseMsg } from "../nats-base-client/types.ts";
+import { JsCallback, PullSubscription } from "./jssub.ts";
 
 export interface JetStreamClient {
   publish(
@@ -27,7 +27,7 @@ export interface JetStreamClient {
     subj: string,
     opts: JetStreamSubOptions,
     ...options: JetStreamSubOption[]
-  ): Promise<JsSubscription>;
+  ): Promise<PullSubscription<JsMsg>>;
 }
 
 export interface JetStreamManager {
@@ -104,7 +104,7 @@ export interface JetStreamSubOptions {
   mack?: boolean;
   cfg?: ConsumerConfig;
   queue?: string;
-  callback?: (err: (NatsError | null), msg: JsMsg) => void;
+  callback?: JsCallback;
   max?: number;
 }
 
@@ -305,14 +305,6 @@ export interface PeerInfo {
   active: number; //ns
 }
 
-export interface StreamLister {
-  page: StreamInfo[];
-  err: Error;
-
-  offset: number;
-  pageInfo: ApiPaged;
-}
-
 export interface PagedOffset {
   offset: number;
 }
@@ -413,7 +405,6 @@ export interface AccountInfo {
 
 export interface AccountInfoResponse extends ApiResponse, AccountInfo {}
 
-// from nats.go
 export interface AccountLimits {
   max_memory: number;
   max_storage: number;
@@ -421,12 +412,11 @@ export interface AccountLimits {
   max_consumers: number;
 }
 
-// from nats.go
 export interface ApiError {
   code: number;
   description: string;
 }
-// from nats.go
+
 export interface ApiResponse {
   type: string;
   error?: ApiError;
@@ -448,12 +438,7 @@ export interface PubAck {
 export interface PubAckResponse extends ApiResponse, PubAck {}
 export interface StreamInfoResponse extends ApiResponse, StreamInfo {}
 
-export interface JsMsg {
-  subject: string;
-  sid: number;
-  data: Uint8Array;
-  headers?: MsgHdrs;
-  reply: string;
+export interface JsMsg extends BaseMsg {
   redelivered: boolean;
   info: DeliveryInfo;
   seq: number;

@@ -13,13 +13,19 @@
  * limitations under the License.
  */
 import { QueuedIterator } from "./queued_iterator.ts";
-import type { Base, Msg, Subscription, SubscriptionOptions } from "./types.ts";
+import type {
+  Base,
+  BaseMsg,
+  Msg,
+  Subscription,
+  SubscriptionOptions,
+} from "./types.ts";
 import { deferred, extend, Timeout, timeout } from "./util.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import type { ProtocolHandler } from "./protocol.ts";
 
-export class SubscriptionImpl extends QueuedIterator<Msg>
-  implements Base, Subscription {
+export class SubscriptionImpl<T> extends QueuedIterator<T>
+  implements Base<T>, Subscription<T> {
   sid!: number;
   queue?: string;
   draining: boolean;
@@ -57,7 +63,9 @@ export class SubscriptionImpl extends QueuedIterator<Msg>
 
   callback(err: NatsError | null, msg: Msg) {
     this.cancelTimeout();
-    err ? this.stop(err) : this.push(msg);
+    const u = msg as unknown;
+    const t = u as T;
+    err ? this.stop(err) : this.push(t);
   }
 
   close(): void {

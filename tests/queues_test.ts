@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { connect, createInbox, Subscription } from "../src/mod.ts";
+import { connect, createInbox, Msg, Subscription } from "../src/mod.ts";
 import { assertEquals } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 
 const u = "demo.nats.io:4222";
@@ -53,7 +53,7 @@ Deno.test("queues - deliver to multiple queues", async () => {
   nc.publish(subj);
   await nc.flush();
 
-  const mc = (subs: Subscription[]): number => {
+  const mc = (subs: Subscription<Msg>[]): number => {
     const received = subs.map((s) => s.getReceived());
     return received.reduce((p, c) => p + c);
   };

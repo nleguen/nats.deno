@@ -18,6 +18,7 @@ import { createInbox, ProtocolHandler } from "./protocol.ts";
 import { SubscriptionImpl } from "./subscription.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import {
+  BaseMsg,
   ConnectionOptions,
   Empty,
   Msg,
@@ -94,7 +95,7 @@ export class NatsConnectionImpl implements NatsConnection {
   subscribe(
     subject: string,
     opts: SubscriptionOptions = {},
-  ): Subscription {
+  ): Subscription<Msg> {
     if (this.isClosed()) {
       throw NatsError.errorForCode(ErrorCode.CONNECTION_CLOSED);
     }
@@ -106,7 +107,7 @@ export class NatsConnectionImpl implements NatsConnection {
       throw NatsError.errorForCode(ErrorCode.BAD_SUBJECT);
     }
 
-    const sub = new SubscriptionImpl(this.protocol, subject, opts);
+    const sub = new SubscriptionImpl<Msg>(this.protocol, subject, opts);
     this.protocol.subscribe(sub);
     return sub;
   }

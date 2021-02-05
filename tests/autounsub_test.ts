@@ -19,6 +19,7 @@ import {
   createInbox,
   Empty,
   ErrorCode,
+  Msg,
   Subscription,
 } from "../src/mod.ts";
 import { Lock } from "./helpers/mod.ts";
@@ -99,12 +100,12 @@ Deno.test("autounsub - request receives expected count with multiple helpers", a
   const nc = await connect({ servers: u });
   const subj = createInbox();
 
-  const fn = (async (sub: Subscription) => {
+  const fn = (async (sub: Subscription<Msg>) => {
     for await (const m of sub) {
       m.respond();
     }
   });
-  const subs: Subscription[] = [];
+  const subs: Subscription<Msg>[] = [];
   for (let i = 0; i < 5; i++) {
     const sub = nc.subscribe(subj);
     fn(sub).then();
@@ -125,7 +126,7 @@ Deno.test("autounsub - manual request receives expected count with multiple help
   const subj = createInbox();
   const lock = Lock(5);
 
-  const fn = (async (sub: Subscription) => {
+  const fn = (async (sub: Subscription<Msg>) => {
     for await (const m of sub) {
       m.respond();
       lock.unlock();
