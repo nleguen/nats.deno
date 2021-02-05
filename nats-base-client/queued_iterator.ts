@@ -25,6 +25,7 @@ export class QueuedIterator<T> implements Dispatcher<T> {
   received: number; // this is updated by the protocol
   protected noIterator: boolean;
   protected done: boolean;
+  protected postYield?: (m: T) => void;
   private signal: Deferred<void>;
   private yields: T[];
   private err?: Error;
@@ -68,6 +69,9 @@ export class QueuedIterator<T> implements Dispatcher<T> {
       for (let i = 0; i < yields.length; i++) {
         this.processed++;
         yield yields[i];
+        if (this.postYield) {
+          this.postYield(yields[i]);
+        }
         this.inflight--;
       }
       // yielding could have paused and microtask

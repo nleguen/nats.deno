@@ -1,9 +1,21 @@
-import {
-  Subscription,
-  SubscriptionOptions,
-} from "../nats-base-client/types.ts";
-import { NatsError } from "../nats-base-client/error.ts";
+/*
+ * Copyright 2021 The NATS Authors
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import { MsgHdrs } from "../nats-base-client/headers.ts";
+import { NatsError } from "../nats-base-client/error.ts";
+import { JsSubscription } from './jssub.ts'
 
 export interface JetStreamClient {
   publish(
@@ -13,9 +25,9 @@ export interface JetStreamClient {
   ): Promise<PubAck>;
   subscribe(
     subj: string,
-    opts: JetStreamSubOpts,
+    opts: JetStreamSubOptions,
     ...options: JetStreamSubOption[]
-  ): Promise<Subscription>;
+  ): Promise<JsSubscription>;
 }
 
 export interface JetStreamManager {
@@ -24,29 +36,30 @@ export interface JetStreamManager {
   // Update a stream
   updateStream(cfg: StreamConfig): Promise<StreamInfo>;
   // Delete a stream
-  deleteStream(name: string): Promise<void>;
+  deleteStream(name: string): Promise<boolean>;
   // Stream information
   streamInfo(name: string): Promise<StreamInfo>;
   // Purge stream messages
   purgeStream(name: string): Promise<void>;
   // newStreamListener is used to return pages of StreamInfo
   // FIXME: this an iterator
-  newStreamLister(): Promise<StreamLister>;
+  streamLister(): Lister<StreamInfo>;
   // deleteMsg erases a message from a stream
-  deleteMsg(name: string, seq: number): Promise<void>;
+  deleteMsg(name: string, seq: number): Promise<boolean>;
 
   // Create a consumer
   addConsumer(stream: string, cfg: ConsumerConfig): Promise<ConsumerInfo>;
   // Delete a consumer
-  deleteConsumer(stream: string, consumer: string): Promise<void>;
+  deleteConsumer(stream: string, consumer: string): Promise<boolean>;
   // Consumer information
   consumerInfo(stream: string, name: string): Promise<ConsumerInfo>;
   // newConsumerListener is used to return pages of ConsumerInfo
-  // FIXME: this is an iterator
-  newConsumerLister(stream: string): Promise<ConsumerLister>;
+  consumerLister(stream: string): Lister<ConsumerInfo>;
 
   // AccountInfo retrieves info about the JetStream usage from an account
   getAccountInfo(): Promise<AccountInfo>;
+
+  streamNameBySubject(subject: string): Promise<string>;
 }
 
 export interface JetStreamPubOpts {
@@ -55,16 +68,6 @@ export interface JetStreamPubOpts {
   lid?: string; // expected last message id
   str?: string; // stream name
   seq?: number; // expected last sequence
-}
-
-export interface JetStreamSubOpts {
-  name?: string;
-  stream?: string;
-  consumer?: string;
-  pullCount?: number;
-  mack?: boolean;
-  cfg: ConsumerConfig;
-  queue?: string;
 }
 
 export type JetStreamPubOption = (opts: JetStreamPubOpts) => void;
@@ -93,19 +96,47 @@ export function msgID(id: string): JetStreamPubOption {
   };
 }
 
+export interface JetStreamSubOptions {
+  name?: string;
+  stream?: string;
+  consumer?: string;
+  pull?: number;
+  mack?: boolean;
+  cfg?: ConsumerConfig;
+  queue?: string;
+  callback?: (err: (NatsError | null), msg: JsMsg) => void;
+  max?: number;
+}
+
+export interface JetStreamSubOpts {
+  name: string;
+  stream: string;
+  consumer: string;
+  pull: number;
+  mack: boolean;
+  cfg: ConsumerConfig;
+  queue?: string;
+  callback?: (err: (NatsError | null), msg: JsMsg) => void;
+  max?: number;
+}
+
 export type JetStreamSubOption = (opts: JetStreamSubOpts) => void;
+
+export function validateDurableName(name: string) {
+  if (name === "") {
+    throw Error("name is required");
+  }
+  const bad = [".", "*", ">"];
+  bad.forEach((v) => {
+    if (name.indexOf(v) !== -1) {
+      throw Error(`invalid durable name - durable name cannot contain '${v}'`);
+    }
+  });
+}
 
 export function durable(name: string): JetStreamSubOption {
   return (opts: JetStreamSubOpts) => {
-    if (name === "") {
-      throw Error("name is required");
-    }
-    const bad = [".", "*", ">"];
-    bad.forEach((v) => {
-      if (name.indexOf(v) !== -1) {
-        throw Error(`durable name cannot contain '${v}'`);
-      }
-    });
+    validateDurableName(name);
     opts.cfg.durable_name = name;
   };
 }
@@ -122,7 +153,7 @@ export function pull(batchSize: number): JetStreamSubOption {
     if (batchSize <= 0) {
       throw new Error("batchsize must be greater than 0");
     }
-    opts.pullCount = batchSize;
+    opts.pull = batchSize;
   };
 }
 
@@ -282,10 +313,26 @@ export interface StreamLister {
   pageInfo: ApiPaged;
 }
 
+export interface PagedOffset {
+  offset: number;
+}
+
 export interface ApiPaged {
   total: number;
   offset: number;
   limit: number;
+}
+
+export interface ConsumerListResponse extends ApiResponse, ApiPaged {
+  consumers: ConsumerInfo[];
+}
+
+export interface StreamListResponse extends ApiResponse, ApiPaged {
+  streams: StreamInfo[];
+}
+
+export interface SuccessResponse extends ApiResponse {
+  success: boolean;
 }
 
 export interface ConsumerConfig {
@@ -305,6 +352,15 @@ export interface ConsumerConfig {
   max_ack_pending?: number;
 }
 
+export interface CreateConsumerRequest {
+  stream_name: string;
+  config: ConsumerConfig;
+}
+
+export interface DeleteMsgRequest {
+  seq: number;
+}
+
 export enum DeliverPolicy {
   All = "all",
   Last = "last",
@@ -317,6 +373,7 @@ export enum AckPolicy {
   None = "none",
   All = "all",
   Explicit = "explicit",
+  NotSet = "",
 }
 
 export enum ReplayPolicy {
@@ -343,12 +400,8 @@ export interface SequencePair {
   stream_seq: number;
 }
 
-export interface ConsumerLister {
-  stream: string;
-  err: Error;
-  offset: number;
-  page: ConsumerInfo[];
-  pageInfo: ApiPaged;
+export interface Lister<T> {
+  next(): Promise<T[]>;
 }
 
 export interface AccountInfo {
@@ -420,4 +473,21 @@ export interface DeliveryInfo {
   dseq: number;
   ts: number;
   pending: number;
+}
+
+export interface StreamNames {
+  streams: string[];
+}
+
+export interface StreamNamesResponse
+  extends StreamNames, ApiResponse, ApiPaged {}
+
+export interface StreamNameBySubject {
+  subject: string;
+}
+
+export interface NextRequest {
+  expires: number;
+  batch: number;
+  no_wait: boolean;
 }
