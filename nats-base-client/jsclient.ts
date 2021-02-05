@@ -36,9 +36,10 @@ import {
   JsMsg,
   PubAck,
   PubAckResponse,
-  PubHeaders, PullSubscription,
+  PubHeaders,
+  PullSubscription,
   ReplayPolicy,
-} from './jstypes.ts'
+} from "./jstypes.ts";
 import { Codec, JSONCodec } from "./codec.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import { defaultPrefix, defaultTimeout } from "./jetstream.ts";

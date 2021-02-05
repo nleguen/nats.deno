@@ -14,10 +14,7 @@
  */
 import { JetStreamConfig, NatsServer } from "./helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
-import {
-  JetStream,
-  JetStreamManager,
-} from "../nats-base-client/jetstream.ts";
+import { JetStream, JetStreamManager } from "../nats-base-client/jetstream.ts";
 import {
   assert,
   assertEquals,

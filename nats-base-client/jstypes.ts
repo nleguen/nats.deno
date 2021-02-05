@@ -14,7 +14,7 @@
  */
 
 import { NatsError } from "./error.ts";
-import { BaseMsg, Subscription } from './types.ts'
+import { BaseMsg, Subscription } from "./types.ts";
 import { JsCallback } from "./jssub.ts";
 
 export interface JetStreamClient {
