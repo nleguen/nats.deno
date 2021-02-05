@@ -14,8 +14,8 @@
  */
 
 import { NatsError } from "./error.ts";
-import { BaseMsg } from "./types.ts";
-import { JsCallback, PullSubscription } from "./jssub.ts";
+import { BaseMsg, Subscription } from './types.ts'
+import { JsCallback } from "./jssub.ts";
 
 export interface JetStreamClient {
   publish(
@@ -28,6 +28,10 @@ export interface JetStreamClient {
     opts: JetStreamSubOptions,
     ...options: JetStreamSubOption[]
   ): Promise<PullSubscription<JsMsg>>;
+}
+
+export interface PullSubscription<T> extends Subscription<T> {
+  pull(): void;
 }
 
 export interface JSM {

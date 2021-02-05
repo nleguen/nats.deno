@@ -14,7 +14,7 @@
  */
 
 import { NatsError } from "./error.ts";
-import { JsMsg, NextRequest } from "./jstypes.ts";
+import { JsMsg, NextRequest, PullSubscription } from './jstypes.ts'
 import {
   Msg,
   NatsConnection,
@@ -35,10 +35,6 @@ export interface SubConsumerInfo {
   durable?: boolean;
   pull?: number;
   attached?: boolean;
-}
-
-export interface PullSubscription<T> extends Subscription<T> {
-  pull(): void;
 }
 
 export class JsSubscriptionImpl<T> extends SubscriptionImpl<T>

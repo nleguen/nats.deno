@@ -36,14 +36,14 @@ import {
   JsMsg,
   PubAck,
   PubAckResponse,
-  PubHeaders,
+  PubHeaders, PullSubscription,
   ReplayPolicy,
-} from "./jstypes.ts";
+} from './jstypes.ts'
 import { Codec, JSONCodec } from "./codec.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import { defaultPrefix, defaultTimeout } from "./jetstream.ts";
 import { headers } from "./headers.ts";
-import { JsSubscriptionImpl, PullSubscription } from "./jssub.ts";
+import { JsSubscriptionImpl } from "./jssub.ts";
 import { createInbox } from "./protocol.ts";
 import { JsMsgImpl } from "./jsmsg.ts";
 import { NatsConnectionImpl } from "./nats.ts";

@@ -55,3 +55,7 @@ export { Bench, Metric } from "./bench.ts";
 export type { BenchOpts } from "./bench.ts";
 export { TD, TE } from "./encoders.ts";
 export { isIP, parseIP } from "./ipparser.ts";
+
+export * from "./jstypes.ts";
+// these in progress
+export { JetStream, JetStreamManager } from "./jetstream.ts";
