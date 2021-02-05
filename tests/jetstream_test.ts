@@ -22,7 +22,7 @@ import {
   JetStreamManager,
   msgID,
   StorageType,
-} from "../nats-base-client/jetstream/mod.ts";
+} from "../nats-base-client/jsmod.ts";
 
 import {
   assert,

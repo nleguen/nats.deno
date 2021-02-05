@@ -14,8 +14,8 @@
  */
 
 import { DeliveryInfo, JsMsg } from "./jstypes.ts";
-import { Msg } from "../types.ts";
-import { MsgHdrs } from "../headers.ts";
+import { Msg } from "./types.ts";
+import { MsgHdrs } from "./headers.ts";
 
 const ACK = Uint8Array.of(43, 65, 67, 75);
 const NAK = Uint8Array.of(45, 78, 65, 75);

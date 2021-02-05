@@ -15,7 +15,7 @@
 
 import type { JetStreamClient, JetStreamOptions, JSM } from "./jstypes.ts";
 
-import { ErrorCode, NatsConnection, NatsError } from "../mod.ts";
+import { ErrorCode, NatsConnection, NatsError } from "./mod.ts";
 
 import { JetStreamManagerImpl } from "./jsm.ts";
 import { JetStreamClientImpl } from "./jsclient.ts";

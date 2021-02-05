@@ -13,18 +13,18 @@
  * limitations under the License.
  */
 
-import { NatsError } from "../error.ts";
+import { NatsError } from "./error.ts";
 import { JsMsg, NextRequest } from "./jstypes.ts";
 import {
   Msg,
   NatsConnection,
   Subscription,
   SubscriptionOptions,
-} from "../types.ts";
-import { SubscriptionImpl } from "../subscription.ts";
-import { NatsConnectionImpl } from "../nats.ts";
+} from "./types.ts";
+import { SubscriptionImpl } from "./subscription.ts";
+import { NatsConnectionImpl } from "./nats.ts";
 import { JsMsgImpl } from "./jsmsg.ts";
-import { Codec, JSONCodec } from "../mod.ts";
+import { Codec, JSONCodec } from "./mod.ts";
 
 export type JsCallback = (err: NatsError | null, msg: JsMsg) => void;
 
