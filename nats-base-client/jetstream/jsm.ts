@@ -32,7 +32,7 @@ import {
   SuccessResponse,
   validateDurableName,
 } from "./jstypes.ts";
-import { Empty, NatsConnection } from "../nats-base-client/types.ts";
+import { Empty, NatsConnection } from "../types.ts";
 import { ListerFieldFilter, ListerImpl } from "./jslister.ts";
 import { BaseJsClient } from "./jsclient.ts";
 

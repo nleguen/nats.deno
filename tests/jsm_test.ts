@@ -1,6 +1,9 @@
 import { JetStreamConfig, NatsServer } from "../tests/helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
-import { JetStream, JetStreamManager } from "../jetstream/jetstream.ts";
+import {
+  JetStream,
+  JetStreamManager,
+} from "../nats-base-client/jetstream/jetstream.ts";
 import {
   assert,
   assertEquals,
@@ -14,7 +17,7 @@ import {
   JsMsg,
   PubAck,
   StreamConfig,
-} from "../jetstream/jstypes.ts";
+} from "../nats-base-client/jetstream/jstypes.ts";
 import { nuid } from "../nats-base-client/nuid.ts";
 
 Deno.test("jsm - create", async () => {

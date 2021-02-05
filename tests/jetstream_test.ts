@@ -1,6 +1,14 @@
 import { JetStreamConfig, NatsServer } from "../tests/helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
-import { JetStream, JetStreamManager } from "../jetstream/jetstream.ts";
+import {
+  expectLastMsgID,
+  expectLastSequence,
+  expectStream,
+  JetStream,
+  JetStreamManager,
+  msgID,
+  StorageType,
+} from "../nats-base-client/jetstream/mod.ts";
 
 import {
   assert,
@@ -9,13 +17,6 @@ import {
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "../tests/helpers/asserts.ts";
 import { ErrorCode, NatsError, StringCodec } from "../nats-base-client/mod.ts";
-import {
-  expectLastMsgID,
-  expectLastSequence,
-  expectStream,
-  msgID,
-  StorageType,
-} from "../jetstream/jstypes.ts";
 
 Deno.test("jetstream - jetstream not enabled", async () => {
   // start a regular server

@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-import { NatsError } from "../nats-base-client/error.ts";
-import { BaseMsg } from "../nats-base-client/types.ts";
+import { NatsError } from "../error.ts";
+import { BaseMsg } from "../types.ts";
 import { JsCallback, PullSubscription } from "./jssub.ts";
 
 export interface JetStreamClient {

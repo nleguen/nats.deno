@@ -18,7 +18,7 @@ import {
   NatsConnection,
   RequestOptions,
   SubscriptionOptions,
-} from "../nats-base-client/types.ts";
+} from "../types.ts";
 import {
   AckPolicy,
   ApiResponse,
@@ -39,14 +39,14 @@ import {
   PubHeaders,
   ReplayPolicy,
 } from "./jstypes.ts";
-import { Codec, JSONCodec } from "../nats-base-client/codec.ts";
-import { ErrorCode, NatsError } from "../nats-base-client/error.ts";
+import { Codec, JSONCodec } from "../codec.ts";
+import { ErrorCode, NatsError } from "../error.ts";
 import { defaultPrefix, defaultTimeout } from "./jetstream.ts";
-import { headers } from "../nats-base-client/headers.ts";
+import { headers } from "../headers.ts";
 import { JsSubscriptionImpl, PullSubscription } from "./jssub.ts";
-import { createInbox } from "../nats-base-client/protocol.ts";
+import { createInbox } from "../protocol.ts";
 import { JsMsgImpl } from "./jsmsg.ts";
-import { NatsConnectionImpl } from "../nats-base-client/nats.ts";
+import { NatsConnectionImpl } from "../nats.ts";
 
 export class BaseJsClient {
   nc: NatsConnection;
