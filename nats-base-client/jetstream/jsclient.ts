@@ -155,9 +155,6 @@ export class JetStreamClientImpl extends BaseJsClient
     return pa;
   }
 
-  async attach(subj: string, ...jsopts: JetStreamSubOption[]) {
-  }
-
   _initSubOpts(
     args = {} as JetStreamSubOptions,
     ...options: JetStreamSubOption[]
@@ -192,7 +189,7 @@ export class JetStreamClientImpl extends BaseJsClient
   ): Promise<PullSubscription<JsMsg>> {
     const o = this._initSubOpts(opts, ...options);
 
-    let pullMode = o.pull > 0;
+    const pullMode = o.pull > 0;
 
     let stream = o.stream;
     let consumer = o.consumer;

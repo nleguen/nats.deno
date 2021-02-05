@@ -361,7 +361,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       return;
     }
 
-    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl<any>;
+    const sub = this.subscriptions.get(msg.sid) as SubscriptionImpl<unknown>;
     if (!sub) {
       return;
     }
@@ -564,7 +564,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return r;
   }
 
-  subscribe(s: SubscriptionImpl<any>): Subscription<any> {
+  subscribe(s: SubscriptionImpl<unknown>): Subscription<unknown> {
     this.subscriptions.add(s);
     if (s.queue) {
       this.sendCommand(`SUB ${s.subject} ${s.queue} ${s.sid}\r\n`);
@@ -577,14 +577,14 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     return s;
   }
 
-  unsubscribe(s: SubscriptionImpl<any>, max?: number) {
+  unsubscribe(s: SubscriptionImpl<unknown>, max?: number) {
     this.unsub(s, max);
     if (s.max === undefined || s.received >= s.max) {
       this.subscriptions.cancel(s);
     }
   }
 
-  unsub(s: SubscriptionImpl<any>, max?: number) {
+  unsub(s: SubscriptionImpl<unknown>, max?: number) {
     if (!s || this.isClosed()) {
       return;
     }
@@ -608,7 +608,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   sendSubscriptions() {
     const cmds: string[] = [];
     this.subscriptions.all().forEach((s) => {
-      const sub = s as SubscriptionImpl<any>;
+      const sub = s as SubscriptionImpl<unknown>;
       if (sub.queue) {
         cmds.push(`SUB ${sub.subject} ${sub.queue} ${sub.sid}${CR_LF}`);
       } else {
