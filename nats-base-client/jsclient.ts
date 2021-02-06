@@ -192,7 +192,6 @@ export class JetStreamClientImpl extends BaseJsClient
     const o = this._initSubOpts(opts, ...options);
 
     const pullMode = o.pull > 0;
-
     let stream = o.stream;
     let consumer = o.consumer;
     let attached = false;
@@ -200,30 +199,31 @@ export class JetStreamClientImpl extends BaseJsClient
 
     let ccfg: ConsumerConfig;
     let shouldCreate = false;
-    const requiresApi = stream !== "" &&
-      (consumer !== "" || o.cfg.deliver_subject !== "");
+    const requiresApi = (!stream && !consumer) && !o.cfg.deliver_subject;
 
     if (this.opts.direct && requiresApi) {
-      throw new Error("direct mode requires direct pull or push");
+      throw new Error("jsm api use is not allowed on direct mode");
     }
 
     if (this.opts.direct) {
       if (o.cfg.deliver_subject) {
         deliver = o.cfg.deliver_subject;
+      } else {
+        // use the subject given
+        deliver = subj;
       }
+      attached = true;
     } else {
-      if (!this.jsm) {
-        throw new Error("no jsm when trying to attach");
-      }
-      const jsm = this.jsm;
+      // find the stream...
+      const jsm = this.jsm!;
       stream = await jsm.streamNameBySubject(subj);
       let info: ConsumerInfo;
       consumer = o.cfg.durable_name || "";
       if (consumer) {
+        // match to the consumer
         info = await jsm.consumerInfo(stream, consumer);
         ccfg = info.config;
         attached = true;
-
         if (ccfg.filter_subject && subj != ccfg.filter_subject) {
           throw new Error("subject doesn't match consumer");
         }
@@ -231,6 +231,7 @@ export class JetStreamClientImpl extends BaseJsClient
           deliver = ccfg.deliver_subject;
         }
       } else {
+        // create the consumer
         shouldCreate = true;
         if (!pullMode) {
           o.cfg.deliver_subject = deliver;
@@ -260,7 +261,6 @@ export class JetStreamClientImpl extends BaseJsClient
         sub.info.deliver = ci.config.deliver_subject;
         sub.info.durable = isDurable;
       } catch (err) {
-        console.log("ZONK", err);
         sub.unsubscribe();
         throw err;
       }

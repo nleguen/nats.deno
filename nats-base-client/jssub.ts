@@ -61,8 +61,15 @@ export class JsSubscriptionImpl<T> extends SubscriptionImpl<T>
         const um = m as unknown;
         const jm = um as JsMsg;
         jm.ack();
+        console.log(`ack for ${jm.info.sseq}`);
       };
     }
+  }
+
+  unsubscribe(max?: number) {
+    // FIXME: delete consumers
+    console.info("need to delete consumers if direct");
+    super.unsubscribe(max);
   }
 
   callback(err: NatsError | null, msg: Msg): void {

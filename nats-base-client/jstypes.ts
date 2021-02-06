@@ -145,10 +145,9 @@ export function durable(name: string): JetStreamSubOption {
   };
 }
 
-export function attach(stream: string, consumer: string): JetStreamSubOption {
+export function attach(deliver_subject: string): JetStreamSubOption {
   return (opts: JetStreamSubOpts) => {
-    opts.stream = stream;
-    opts.consumer = consumer;
+    opts.cfg.deliver_subject = deliver_subject;
   };
 }
 
@@ -167,14 +166,9 @@ export function pullDirect(
   batchSize: number,
 ): JetStreamSubOption {
   return (opts: JetStreamSubOpts) => {
+    opts.stream = stream;
+    opts.consumer = consumer;
     pull(batchSize)(opts);
-    attach(stream, consumer)(opts);
-  };
-}
-
-export function pushDirect(subject: string): JetStreamSubOption {
-  return (opts: JetStreamSubOpts) => {
-    opts.cfg.deliver_subject = subject;
   };
 }
 

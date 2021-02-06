@@ -15,43 +15,68 @@
 import { JetStreamConfig, NatsServer } from "./helpers/launcher.ts";
 import { connect } from "../src/connect.ts";
 import {
+  AckPolicy,
+  attach,
+  DeliverPolicy,
   expectLastMsgID,
   expectLastSequence,
   expectStream,
   JetStream,
   JetStreamManager,
+  JsMsg,
   msgID,
-  StorageType,
 } from "../nats-base-client/jsmod.ts";
 
 import {
   assert,
   assertEquals,
-  fail,
+  assertThrowsAsync,
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "./helpers/asserts.ts";
-import { ErrorCode, NatsError, StringCodec } from "../nats-base-client/mod.ts";
+import { Empty, ErrorCode, NatsConnection } from "../nats-base-client/mod.ts";
+import { nuid } from "../nats-base-client/nuid.ts";
+import { deferred } from "../nats-base-client/util.ts";
+import { JsMsgImpl } from "../nats-base-client/jsmsg.ts";
 
-Deno.test("jetstream - jetstream not enabled", async () => {
-  // start a regular server
-  const ns = await NatsServer.start();
+async function setup(
+  conf?: any,
+): Promise<{ ns: NatsServer; nc: NatsConnection }> {
+  const ns = await NatsServer.start(conf);
   const nc = await connect(
     { port: ns.port, noResponders: true, headers: true },
   );
+  return { ns, nc };
+}
 
-  try {
-    await JetStream(nc);
-    fail("should have failed to connect to jetstream");
-  } catch (err) {
-    assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
-  }
-
+async function cleanup(ns: NatsServer, nc: NatsConnection): Promise<void> {
   await nc.close();
   await ns.stop();
+}
+
+async function initStream(
+  nc: NatsConnection,
+): Promise<{ stream: string; subj: string }> {
+  const jsm = await JetStreamManager(nc);
+  const stream = nuid.next();
+  const subj = `${stream}.A`;
+  await jsm.addStream(
+    { name: stream, subjects: [subj] },
+  );
+  return { stream, subj };
+}
+
+Deno.test("jetstream - jetstream not enabled", async () => {
+  // start a regular server - no js conf
+  const { ns, nc } = await setup();
+  const err = await assertThrowsAsync(async () => {
+    await JetStream(nc);
+  });
+  assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jetstream - account not enabled", async () => {
-  const jso = JetStreamConfig({
+  const conf = JetStreamConfig({
     no_auth_user: "rip",
     accounts: {
       JS: {
@@ -63,132 +88,216 @@ Deno.test("jetstream - account not enabled", async () => {
       },
     },
   }, true);
-  const ns = await NatsServer.start(jso);
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
-
-  try {
+  const { ns, nc } = await setup(conf);
+  const err = await assertThrowsAsync(async () => {
     await JetStream(nc);
-    fail("should have failed to connect to jetstream");
-  } catch (err) {
-    assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
-  }
-  await nc.close();
-  await ns.stop();
+  });
+  assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jetstream - jetstream enabled", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
-
-  try {
-    await JetStream(nc);
-  } catch (err) {
-    fail(`should have connected: ${err}`);
-  }
-
-  await nc.close();
-  await ns.stop();
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  await JetStream(nc);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jetstream - publish to not existing stream", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
-  const sc = StringCodec();
-  const njs = await JetStream(nc);
-  try {
-    await njs.publish("foo", sc.encode("hello"));
-    fail("shouldn't have succeeded");
-  } catch (err) {
-    assertErrorCode(err, ErrorCode.NO_RESPONDERS);
-  }
-
-  await nc.close();
-  await ns.stop();
+Deno.test("jetstream - publish to non existing stream fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const js = await JetStream(nc);
+  const err = await assertThrowsAsync(async () => {
+    await js.publish("foo", Empty);
+  });
+  assertErrorCode(err, ErrorCode.NO_RESPONDERS);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jetstream - publish to existing stream", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { subj } = await initStream(nc);
   const njs = await JetStream(nc);
-  const jsm = await JetStreamManager(nc);
-  let si = await jsm.addStream(
-    { name: "test", subjects: ["foo", "bar", "baz"] },
-  );
-  assertEquals(si.config.storage, StorageType.File);
+  await njs.publish(subj, Empty);
+  await cleanup(ns, nc);
+});
 
-  const sc = StringCodec();
-  let pa = await njs.publish("foo", sc.encode("hello"));
-  assertEquals(pa.stream, "test");
+Deno.test("jetstream - expect stream", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const s1 = await initStream(nc);
+  const s2 = await initStream(nc);
+  const njs = await JetStream(nc);
+  const err = await assertThrowsAsync(async () => {
+    await njs.publish(s1.subj, Empty, expectStream(s2.stream));
+  });
+  assertEquals(err.message, `expected stream does not match`);
+  await njs.publish(s2.subj, Empty, expectStream(s2.stream));
+  await cleanup(ns, nc);
+});
+
+Deno.test("jetstream - expect last sequence", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
+  const njs = await JetStream(nc);
+  const err = await assertThrowsAsync(async () => {
+    await njs.publish(subj, Empty, expectLastSequence(10));
+  });
+  assertEquals(err.message, "wrong last sequence: 0");
+
+  let pa = await njs.publish(subj, Empty, expectLastSequence(0));
+  assert(!pa.duplicate);
+  assertEquals(pa.stream, stream);
   assertEquals(pa.seq, 1);
 
-  // test stream expectation
-  try {
-    await njs.publish("foo", sc.encode("hello"), expectStream("ORDERS"));
-    fail("expected error");
-  } catch (err) {
-    const nerr = err as NatsError;
-    assertEquals(nerr.message, "expected stream does not match");
-  }
-  // test last sequence expectation
-  try {
-    await njs.publish("foo", sc.encode("hello"), expectLastSequence(10));
-    fail("expected error");
-  } catch (err) {
-    const nerr = err as NatsError;
-    assertEquals(nerr.message, "wrong last sequence: 1");
-  }
-
-  pa = await njs.publish("foo", sc.encode("hello"), msgID("ZZZ"));
-  assertEquals(pa.stream, "test");
+  pa = await njs.publish(subj, Empty, expectLastSequence(1));
+  assert(!pa.duplicate);
+  assertEquals(pa.stream, stream);
   assertEquals(pa.seq, 2);
+  await cleanup(ns, nc);
+});
 
-  pa = await njs.publish("foo", sc.encode("hello"), msgID("ZZZ"));
-  assertEquals(pa.stream, "test");
-  assertEquals(pa.seq, 2);
-  assert(pa.duplicate);
+Deno.test("jetstream - expect msgID", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { subj } = await initStream(nc);
 
-  // test last id expectation
-  try {
-    await njs.publish("foo", sc.encode("hello"), expectLastMsgID("AAA"));
-    fail("expected error");
-  } catch (err) {
-    const nerr = err as NatsError;
-    assertEquals(nerr.message, "wrong last msg ID: ZZZ");
-  }
+  const njs = await JetStream(nc);
+  await njs.publish(subj, Empty, msgID("foo"));
 
-  // test last sequence
-  try {
-    await njs.publish("foo", sc.encode("hello"), expectLastSequence(22));
-    fail("expected error");
-  } catch (err) {
-    const nerr = err as NatsError;
-    assertEquals(nerr.message, "wrong last sequence: 2");
-  }
+  const err = await assertThrowsAsync(async () => {
+    await njs.publish(subj, Empty, expectLastMsgID("bar"));
+  });
+  assertEquals(err.message, "wrong last msg ID: foo");
+  await njs.publish(subj, Empty, expectLastMsgID("foo"));
+  await cleanup(ns, nc);
+});
 
-  pa = await njs.publish("foo", sc.encode("hello"), expectLastSequence(2));
-  assertEquals(pa.stream, "test");
-  assertEquals(pa.seq, 3);
-  si = await jsm.streamInfo("test");
-  assertEquals(si.state.messages, 3);
-  assertEquals(si.state.last_seq, 3);
+Deno.test("jetstream - direct rejects api use", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { subj } = await initStream(nc);
+  const js = await JetStream(nc, { direct: true });
+  await js.publish(subj, Empty);
+  const err = await assertThrowsAsync(async () => {
+    await js.subscribe("foo.A", {});
+  });
+  assertEquals(err.message, "jsm api use is not allowed on direct mode");
+  await cleanup(ns, nc);
+});
 
-  // // test timeout
-  // try {
-  //   await njs.publish("foo", sc.encode("hello"), { ttl: 1 });
-  //   fail("expected error");
-  // } catch (err) {
-  //   const nerr = err as NatsError;
-  //   assertEquals(nerr.code, ErrorCode.TIMEOUT);
-  // }
+Deno.test("jetstream - ephemeral consumer", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
 
-  await nc.close();
-  await ns.stop();
+  const js = await JetStream(nc);
+  await js.publish(subj, Empty);
+  await js.publish(subj, Empty);
+
+  const jsm = await JetStreamManager(nc);
+  let consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 0);
+
+  const done = deferred<void>();
+  const sub = await js.subscribe(subj, { max: 2 });
+  (async () => {
+    for await (const m of sub) {
+      if (sub.getProcessed() === 2) {
+        done.resolve();
+      }
+    }
+  })().then();
+
+  consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 1);
+  await done;
+
+  consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 1);
+  assertEquals(consumers[0].delivered.consumer_seq, 2);
+  assertEquals(consumers[0].delivered.stream_seq, 2);
+  assertEquals(consumers[0].ack_floor.stream_seq, 2);
+  assertEquals(consumers[0].ack_floor.consumer_seq, 2);
+  assertEquals(consumers[0].num_pending, 0);
+  assertEquals(consumers[0].num_waiting, 0);
+  await cleanup(ns, nc);
+});
+
+Deno.test("jetstream - ephemeral consumer manual acks", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
+
+  const js = await JetStream(nc);
+  await js.publish(subj, Empty);
+  await js.publish(subj, Empty);
+
+  const jsm = await JetStreamManager(nc);
+  let consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 0);
+
+  const last = deferred<JsMsg>();
+  const sub = await js.subscribe(subj, { max: 2, mack: true });
+  (async () => {
+    for await (const m of sub) {
+      if (sub.getProcessed() === 1) {
+        m.ack();
+      }
+      if (sub.getProcessed() === 2) {
+        last.resolve(m);
+      }
+    }
+  })().then();
+
+  consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 1);
+  const m = await last;
+
+  consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 1);
+  assertEquals(consumers[0].ack_floor.stream_seq, 1);
+  assertEquals(consumers[0].ack_floor.consumer_seq, 1);
+  assertEquals(consumers[0].num_ack_pending, 1);
+  assertEquals(consumers[0].num_pending, 0);
+  assertEquals(consumers[0].num_waiting, 0);
+
+  m.ack();
+  consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 1);
+  assertEquals(consumers[0].num_ack_pending, 0);
+
+  await cleanup(ns, nc);
+});
+
+Deno.test("jetstream - attach durable consumer", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
+
+  const jsm = await JetStreamManager(nc);
+  await jsm.addConsumer(stream, {
+    deliver_subject: "xxxx",
+    deliver_policy: DeliverPolicy.All,
+    durable_name: "dur",
+    ack_policy: AckPolicy.Explicit,
+  });
+
+  const js = await JetStream(nc, { direct: true });
+  await js.publish(subj, Empty);
+  await js.publish(subj, Empty);
+
+  let ci = await jsm.consumerInfo(stream, "dur");
+  assertEquals(ci.num_pending, 2);
+
+  const sub = await js.subscribe(
+    "xxxx",
+    { max: 2, mack: true },
+    attach("xxxx")
+  );
+
+  console.log(sub.getSubject());
+  const done = (async () => {
+    for await (const jm of sub) {
+      jm.ack();
+    }
+  })();
+  await done;
+  ci = await jsm.consumerInfo(stream, "dur");
+  assertEquals(ci.num_pending, 0);
+  assertEquals(ci.num_ack_pending, 0);
+
+  await cleanup(ns, nc);
 });

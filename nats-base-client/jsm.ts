@@ -36,6 +36,9 @@ import { Empty, NatsConnection } from "./types.ts";
 import { ListerFieldFilter, ListerImpl } from "./jslister.ts";
 import { BaseJsClient } from "./jsclient.ts";
 
+export const StreamNameRequired = "stream name required";
+export const ConsumerNameRequired = "consumer name required";
+
 export class JetStreamManagerImpl extends BaseJsClient implements JSM {
   constructor(nc: NatsConnection, opts?: JetStreamOptions) {
     super(nc, opts);
@@ -51,7 +54,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
     cfg: ConsumerConfig,
   ): Promise<ConsumerInfo> {
     if (!stream) {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     const cr = {} as CreateConsumerRequest;
     cr.config = cfg;
@@ -70,7 +73,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async addStream(cfg = {} as StreamConfig): Promise<StreamInfo> {
     if (!cfg.name) {
-      throw Error("stream name is required");
+      throw Error(StreamNameRequired);
     }
     const r = await this._request(
       `${this.prefix}.STREAM.CREATE.${cfg.name}`,
@@ -80,6 +83,12 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
   }
 
   async consumerInfo(stream: string, name: string): Promise<ConsumerInfo> {
+    if (!stream) {
+      throw new Error(StreamNameRequired);
+    }
+    if (!name) {
+      throw new Error(ConsumerNameRequired);
+    }
     const r = await this._request(
       `${this.prefix}.CONSUMER.INFO.${stream}.${name}`,
       Empty,
@@ -87,13 +96,16 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
     return r as ConsumerInfo;
   }
 
-  async deleteConsumer(stream: string, durable: string): Promise<boolean> {
-    if (!stream || !durable) {
-      throw new Error("stream name is required");
+  async deleteConsumer(stream: string, name: string): Promise<boolean> {
+    if (!stream) {
+      throw new Error(StreamNameRequired);
     }
-    validateDurableName(durable);
+    if (!name) {
+      throw new Error(ConsumerNameRequired);
+    }
+    validateDurableName(name);
     const r = await this._request(
-      `${this.prefix}.CONSUMER.DELETE.${stream}.${durable}`,
+      `${this.prefix}.CONSUMER.DELETE.${stream}.${name}`,
     );
     const cr = r as SuccessResponse;
     return cr.success;
@@ -101,7 +113,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async deleteMsg(stream: string, seq: number): Promise<boolean> {
     if (!stream) {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     const dr = { seq } as DeleteMsgRequest;
     const r = await this._request(
@@ -114,7 +126,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async deleteStream(stream: string): Promise<boolean> {
     if (!stream) {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     const r = await this._request(`${this.prefix}.STREAM.DELETE.${stream}`);
     const cr = r as SuccessResponse;
@@ -123,7 +135,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   consumerLister(stream: string): Lister<ConsumerInfo> {
     if (!stream) {
-      throw new Error("stream is required");
+      throw new Error(StreamNameRequired);
     }
     const filter: ListerFieldFilter<ConsumerInfo> = (
       v: unknown,
@@ -148,7 +160,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async purgeStream(name: string): Promise<void> {
     if (!name) {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     await this._request(`${this.prefix}.STREAM.PURGE.${name}`);
     return Promise.resolve();
@@ -156,7 +168,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async streamInfo(name: string): Promise<StreamInfo> {
     if (name === "") {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     const r = await this._request(`${this.prefix}.STREAM.INFO.${name}`);
     return r as StreamInfo;
@@ -167,7 +179,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
     const d = this.jc.encode(q);
     const r = await this._request(`${this.prefix}.STREAM.NAMES`, d);
     const names = r as StreamNames;
-    if (names.streams.length != 1) {
+    if (!names.streams || names.streams.length !== 1) {
       throw new Error("no stream matches subject");
     }
     return names.streams[0];
@@ -175,7 +187,7 @@ export class JetStreamManagerImpl extends BaseJsClient implements JSM {
 
   async updateStream(cfg = {} as StreamConfig): Promise<StreamInfo> {
     if (!cfg.name) {
-      throw new Error("stream name is required");
+      throw new Error(StreamNameRequired);
     }
     const r = await this._request(
       `${this.prefix}.STREAM.UPDATE.${cfg.name}`,
