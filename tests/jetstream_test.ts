@@ -12,8 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { JetStreamConfig, NatsServer } from "./helpers/launcher.ts";
-import { connect } from "../src/connect.ts";
+import { JetStreamConfig } from "./helpers/launcher.ts";
 import {
   AckPolicy,
   attach,
@@ -33,37 +32,9 @@ import {
   assertThrowsAsync,
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "./helpers/asserts.ts";
-import { Empty, ErrorCode, NatsConnection } from "../nats-base-client/mod.ts";
-import { nuid } from "../nats-base-client/nuid.ts";
+import { Empty, ErrorCode } from "../nats-base-client/mod.ts";
 import { deferred } from "../nats-base-client/util.ts";
-import { JsMsgImpl } from "../nats-base-client/jsmsg.ts";
-
-async function setup(
-  conf?: any,
-): Promise<{ ns: NatsServer; nc: NatsConnection }> {
-  const ns = await NatsServer.start(conf);
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
-  return { ns, nc };
-}
-
-async function cleanup(ns: NatsServer, nc: NatsConnection): Promise<void> {
-  await nc.close();
-  await ns.stop();
-}
-
-async function initStream(
-  nc: NatsConnection,
-): Promise<{ stream: string; subj: string }> {
-  const jsm = await JetStreamManager(nc);
-  const stream = nuid.next();
-  const subj = `${stream}.A`;
-  await jsm.addStream(
-    { name: stream, subjects: [subj] },
-  );
-  return { stream, subj };
-}
+import { cleanup, initStream, setup } from "./test_util.ts";
 
 Deno.test("jetstream - jetstream not enabled", async () => {
   // start a regular server - no js conf
@@ -77,14 +48,14 @@ Deno.test("jetstream - jetstream not enabled", async () => {
 
 Deno.test("jetstream - account not enabled", async () => {
   const conf = JetStreamConfig({
-    no_auth_user: "rip",
+    no_auth_user: "b",
     accounts: {
-      JS: {
+      A: {
         jetstream: "enabled",
-        users: [{ user: "dlc", password: "foo" }],
+        users: [{ user: "a", password: "a" }],
       },
-      IU: {
-        users: [{ user: "rip", password: "bar" }],
+      B: {
+        users: [{ user: "b" }],
       },
     },
   }, true);
@@ -285,7 +256,7 @@ Deno.test("jetstream - attach durable consumer", async () => {
   const sub = await js.subscribe(
     "xxxx",
     { max: 2, mack: true },
-    attach("xxxx")
+    attach("xxxx"),
   );
 
   console.log(sub.getSubject());

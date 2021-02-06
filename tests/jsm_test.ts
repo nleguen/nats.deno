@@ -18,15 +18,13 @@ import { JetStream, JetStreamManager } from "../nats-base-client/jetstream.ts";
 import {
   assert,
   assertEquals,
-  fail,
+  assertThrows,
+  assertThrowsAsync,
 } from "https://deno.land/std@0.83.0/testing/asserts.ts";
 import { assertErrorCode } from "../tests/helpers/mod.ts";
-import { Empty, ErrorCode, StringCodec } from "../nats-base-client/mod.ts";
+import { Empty, ErrorCode } from "../nats-base-client/mod.ts";
 import {
   AckPolicy,
-  JsMsg,
-  ns as nanos,
-  PubAck,
   StreamConfig,
   StreamInfo,
 } from "../nats-base-client/jstypes.ts";
@@ -35,194 +33,141 @@ import {
   ConsumerNameRequired,
   StreamNameRequired,
 } from "../nats-base-client/jsm.ts";
-import { delay } from "../nats-base-client/util.ts";
+import { cleanup, initStream, setup } from "./test_util.ts";
+
+Deno.test("jsm - jetstream not enabled", async () => {
+  // start a regular server - no js conf
+  const { ns, nc } = await setup();
+  const err = await assertThrowsAsync(async () => {
+    await JetStreamManager(nc);
+  });
+  assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
+  await cleanup(ns, nc);
+});
 
 Deno.test("jsm - create", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
   const ai = await jsm.getAccountInfo();
   assert(ai.limits.max_memory > 0);
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - account not enabled", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({
-    no_auth_user: "c",
+  const conf = {
+    no_auth_user: "b",
     accounts: {
       A: {
         jetstream: "enabled",
         users: [{ user: "a", password: "a" }],
       },
       B: {
-        users: [{ user: "b", password: "b" }, { user: "c" }],
+        users: [{ user: "b" }],
       },
     },
-  }, true));
+  };
+  const { ns, nc } = await setup(JetStreamConfig(conf, true));
+  const err = await assertThrowsAsync(async () => {
+    await JetStreamManager(nc);
+  });
+  assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
 
   const a = await connect(
     { port: ns.port, noResponders: true, headers: true, user: "a", pass: "a" },
   );
-  try {
-    await JetStreamManager(a);
-  } catch (err) {
-    fail("expected a to have jetstream support");
-  }
-
-  const b = await connect(
-    { port: ns.port, noResponders: true, headers: true, user: "b", pass: "b" },
-  );
-  try {
-    await JetStreamManager(b);
-    fail("expected b to fail");
-  } catch (err) {
-    assertErrorCode(err, ErrorCode.JETSTREAM_NOT_ENABLED);
-  }
-
+  await JetStreamManager(a);
   await a.close();
-  await b.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - empty stream config fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
-    const _ = await jsm.addStream({} as StreamConfig);
-    fail("expected empty config to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.addStream({} as StreamConfig);
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - empty stream config update fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
+  const name = nuid.next();
+  let ci = await jsm.addStream({ name: name, subjects: [`${name}.>`] });
+  assertEquals(ci!.config!.subjects!.length, 1);
 
-  const subj = nuid.next();
-  let info = await jsm.addStream({ name: subj });
-  assertEquals(info.config.name, subj);
-
-  try {
-    const _ = await jsm.updateStream({} as StreamConfig);
-    fail("expected empty config to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.updateStream({} as StreamConfig);
+  });
+  ci!.config!.subjects!.push("foo");
+  ci = await jsm.updateStream(ci.config);
+  assertEquals(ci!.config!.subjects!.length, 2);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - delete stream not found stream fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - delete empty stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
+  const err = await assertThrowsAsync(async () => {
     await jsm.deleteStream("");
-    fail("expected empty name to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - purge stream not found stream fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - info empty stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
-    await jsm.purgeStream("");
-    fail("expected empty name to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
-});
-
-Deno.test("jsm - stream info empty name fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
-  const jsm = await JetStreamManager(nc);
-  try {
+  const err = await assertThrowsAsync(async () => {
     await jsm.streamInfo("");
-    fail("expected empty name to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - stream info delete message with empty name fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - info msg not found stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
+  const name = nuid.next();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.streamInfo(name);
+  });
+  assertEquals(err.message, "stream not found");
+  await cleanup(ns, nc);
+});
+
+Deno.test("jsm - delete msg empty stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const jsm = await JetStreamManager(nc);
+  const err = await assertThrowsAsync(async () => {
     await jsm.deleteMsg("", 1);
-    fail("expected empty name to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - stream info not found fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - delete msg not found stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
-    await jsm.streamInfo(nuid.next());
-    fail("expected not found stream to fail");
-  } catch (err) {
-    assertEquals(err.message, "stream not found");
-  }
-  await nc.close();
-  await ns.stop();
+  const name = nuid.next();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.deleteMsg(name, 1);
+  });
+  assertEquals(err.message, "stream not found");
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - no streams returns empty lister", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - no stream lister is empty", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  const lister = jsm.streamLister();
-  const infos = await lister.next();
-  assertEquals(infos.length, 0);
-
-  await nc.close();
-  await ns.stop();
+  const streams = await jsm.streamLister().next();
+  assertEquals(streams.length, 0);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - create stream", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - add stream", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
   const name = nuid.next();
   let si = await jsm.addStream({ name });
@@ -250,233 +195,192 @@ Deno.test("jsm - create stream", async () => {
   lister = await jsm.streamLister().next();
   fn(lister[0]);
 
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
+});
+
+Deno.test("jsm - purge not found stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const jsm = await JetStreamManager(nc);
+  const name = nuid.next();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.purgeStream(name);
+  });
+  assertEquals(err.message, "stream not found");
+  await cleanup(ns, nc);
+});
+
+Deno.test("jsm - purge empty stream name fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const jsm = await JetStreamManager(nc);
+  const err = await assertThrowsAsync(async () => {
+    await jsm.purgeStream("");
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - stream purge", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
 
   const js = await JetStream(nc);
-  const ok = await js.publish(name, Empty);
+  const ok = await js.publish(subj, Empty);
   assertEquals(ok.seq, 1);
 
-  let si = await jsm.streamInfo(name);
+  let si = await jsm.streamInfo(stream);
   assertEquals(si.state.messages, 1);
 
-  await jsm.purgeStream(name);
-  si = await jsm.streamInfo(name);
+  await jsm.purgeStream(stream);
+  si = await jsm.streamInfo(stream);
   assertEquals(si.state.messages, 0);
 
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - stream delete", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
-  await jsm.streamInfo(name);
-  await jsm.deleteStream(name);
 
-  try {
-    await jsm.streamInfo(name);
-    fail("expected not found stream to fail");
-  } catch (err) {
-    assertEquals(err.message, "stream not found");
-  }
-  await nc.close();
-  await ns.stop();
+  const js = await JetStream(nc);
+  const ok = await js.publish(subj, Empty);
+  assertEquals(ok.seq, 1);
+  await jsm.deleteStream(stream);
+  const err = await assertThrowsAsync(async () => {
+    await jsm.streamInfo(stream);
+  });
+  assertEquals(err.message, "stream not found");
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - stream delete message", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream, subj } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
 
   const js = await JetStream(nc);
-  const ok = await js.publish(name, Empty);
+  const ok = await js.publish(subj, Empty);
   assertEquals(ok.seq, 1);
 
-  let si = await jsm.streamInfo(name);
+  let si = await jsm.streamInfo(stream);
   assertEquals(si.state.messages, 1);
   assertEquals(si.state.first_seq, 1);
   assertEquals(si.state.last_seq, 1);
 
-  assert(await jsm.deleteMsg(name, 1));
-  si = await jsm.streamInfo(name);
+  assert(await jsm.deleteMsg(stream, 1));
+  si = await jsm.streamInfo(stream);
   assertEquals(si.state.messages, 0);
   assertEquals(si.state.first_seq, 2);
   assertEquals(si.state.last_seq, 1);
 
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - consumer info on empty stream name fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-
-  try {
-    const _ = await jsm.consumerInfo("", "");
-    fail("expected empty stream name to fail");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.consumerInfo("", "");
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - consumer info on empty consumer name fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-
-  try {
-    const _ = await jsm.consumerInfo("somestream", "");
-    fail("expected empty consumer name to fail");
-  } catch (err) {
-    assertEquals(err.message, ConsumerNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.consumerInfo("foo", "");
+  });
+  assertEquals(err.message, ConsumerNameRequired);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - consumer info on not found stream", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - consumer info on not found stream fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-
-  try {
-    const _ = await jsm.consumerInfo("somestream", "consumer");
-    fail("expected stream not found");
-  } catch (err) {
-    assertEquals(err.message, "stream not found");
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.consumerInfo("foo", "dur");
+  });
+  assertEquals(err.message, "stream not found");
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - consumer info on not found consumer", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
-
-  try {
-    const _ = await jsm.consumerInfo(name, "consumer");
-    fail("expected stream not found");
-  } catch (err) {
-    assertEquals(err.message, "consumer not found");
-  }
-  await nc.close();
-  await ns.stop();
+  const err = await assertThrowsAsync(async () => {
+    await jsm.consumerInfo(stream, "dur");
+  });
+  assertEquals(err.message, "consumer not found");
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - consumer info", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
   await jsm.addConsumer(
-    name,
+    stream,
     { durable_name: "dur", ack_policy: AckPolicy.Explicit },
   );
-
-  const ci = await jsm.consumerInfo(name, "dur");
+  const ci = await jsm.consumerInfo(stream, "dur");
   assertEquals(ci.name, "dur");
   assertEquals(ci.config.durable_name, "dur");
   assertEquals(ci.config.ack_policy, AckPolicy.Explicit);
-
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - consumer lister with empty stream fails", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - no consumer lister with empty stream fails", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
   const jsm = await JetStreamManager(nc);
-  try {
-    await jsm.consumerLister("");
-    fail("expected stream name required");
-  } catch (err) {
-    assertEquals(err.message, StreamNameRequired);
-  }
-  await nc.close();
-  await ns.stop();
+  const err = assertThrows(() => {
+    jsm.consumerLister("");
+  });
+  assertEquals(err.message, StreamNameRequired);
+  await cleanup(ns, nc);
 });
 
-Deno.test("jsm - consumer add/delete/list", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+Deno.test("jsm - no consumer lister with no consumers empty", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  await jsm.addStream({ name });
+  const consumers = await jsm.consumerLister(stream).next();
+  assertEquals(consumers.length, 0);
+  await cleanup(ns, nc);
+});
+
+Deno.test("jsm - lister", async () => {
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream } = await initStream(nc);
+  const jsm = await JetStreamManager(nc);
   await jsm.addConsumer(
-    name,
+    stream,
     { durable_name: "dur", ack_policy: AckPolicy.Explicit },
   );
-
-  let lister = await jsm.consumerLister(name);
-  let consumers = await lister.next();
+  let consumers = await jsm.consumerLister(stream).next();
   assertEquals(consumers.length, 1);
-  assertEquals(consumers[0].name, "dur");
+  assertEquals(consumers[0].config.durable_name, "dur");
 
-  await jsm.deleteConsumer(name, "dur");
-  lister = await jsm.consumerLister(name);
-  consumers = await lister.next();
+  await jsm.deleteConsumer(stream, "dur");
+  consumers = await jsm.consumerLister(stream).next();
   assertEquals(consumers.length, 0);
 
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("jsm - update stream", async () => {
-  const ns = await NatsServer.start(JetStreamConfig({}, true));
-  const nc = await connect(
-    { port: ns.port, noResponders: true, headers: true },
-  );
+  const { ns, nc } = await setup(JetStreamConfig({}, true));
+  const { stream } = await initStream(nc);
   const jsm = await JetStreamManager(nc);
-  const name = nuid.next();
-  let info = await jsm.addStream({ name });
-  const max = info.config.max_msgs;
 
-  const oldMax = info.config.max_msgs || 0;
-  info = await jsm.updateStream({ name: name, max_msgs: oldMax + 100 });
-  assertEquals(info.config.name, name);
-  assert(info.config.max_msgs !== oldMax);
-  assertEquals(info.config.max_msgs, oldMax + 100);
-  await nc.close();
-  await ns.stop();
+  let si = await jsm.streamInfo(stream);
+  assertEquals(si.config!.subjects!.length, 1);
+
+  si.config!.subjects!.push("foo");
+  si = await jsm.updateStream(si.config);
+  assertEquals(si.config!.subjects!.length, 2);
+  await cleanup(ns, nc);
 });
