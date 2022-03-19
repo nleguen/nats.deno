@@ -16,6 +16,7 @@
 import { DataBuffer } from "./databuffer.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import { TD } from "./encoders.ts";
+import { QueuedIterator } from "./queued_iterator.ts";
 
 export const CR_LF = "\r\n";
 export const CR_LF_LEN = CR_LF.length;
@@ -34,13 +35,13 @@ export function protoLen(ba: Uint8Array): number {
       return n + 1;
     }
   }
-  return -1;
+  return 0;
 }
 
 export function extractProtocolMessage(a: Uint8Array): string {
   // protocol messages are ascii, so Uint8Array
   const len = protoLen(a);
-  if (len) {
+  if (len > 0) {
     const ba = new Uint8Array(a);
     const out = ba.slice(0, len);
     return TD.decode(out);
@@ -69,42 +70,6 @@ export interface Pending {
   done: boolean;
 }
 
-export function pending(): Pending {
-  const v = {} as Pending;
-  const promise = new Promise<void>((resolve) => {
-    v.promise = () => {
-      return promise;
-    };
-    v.write = (c: number) => {
-      if (v.resolved) {
-        return;
-      }
-      v.pending += c;
-    };
-    v.wrote = (c: number) => {
-      if (v.resolved) {
-        return;
-      }
-      v.pending -= c;
-      if (v.done && 0 >= v.pending) {
-        resolve();
-      }
-    };
-    v.close = () => {
-      v.done = true;
-      if (v.pending === 0) {
-        resolve();
-      }
-    };
-    v.err = () => {
-      v.pending = 0;
-      v.resolved = true;
-      v.close();
-    };
-  });
-  return v;
-}
-
 export function render(frame: Uint8Array): string {
   const cr = "␍";
   const lf = "␊";
@@ -118,9 +83,11 @@ export interface Timeout<T> extends Promise<T> {
 }
 
 export function timeout<T>(ms: number): Timeout<T> {
+  // by generating the stack here to help identify what timed out
+  const err = NatsError.errorForCode(ErrorCode.Timeout);
   let methods;
   let timer: number;
-  const p = new Promise((resolve, reject) => {
+  const p = new Promise((_resolve, reject) => {
     const cancel = (): void => {
       if (timer) {
         clearTimeout(timer);
@@ -129,7 +96,7 @@ export function timeout<T>(ms: number): Timeout<T> {
     methods = { cancel };
     // @ts-ignore: node is not a number
     timer = setTimeout(() => {
-      reject(NatsError.errorForCode(ErrorCode.Timeout));
+      reject(err);
     }, ms);
   });
   // noinspection JSUnusedAssignment
@@ -164,6 +131,14 @@ export function shuffle<T>(a: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+export async function collect<T>(iter: QueuedIterator<T>): Promise<T[]> {
+  const buf: T[] = [];
+  for await (const v of iter) {
+    buf.push(v);
+  }
+  return buf;
 }
 
 export class Perf {

@@ -30,17 +30,17 @@ import {
   assert,
   assertEquals,
   assertThrows,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import type { Publisher } from "../nats-base-client/protocol.ts";
 
 const te = new TextEncoder();
 const td = new TextDecoder();
 
 class NoopDispatcher implements Dispatcher<ParserEvent> {
-  push(a: ParserEvent): void {}
+  push(_a: ParserEvent): void {}
 }
 
-class TestDispatcher implements Dispatcher<ParserEvent> {
+export class TestDispatcher implements Dispatcher<ParserEvent> {
   count = 0;
   pings = 0;
   pongs = 0;
@@ -410,6 +410,29 @@ Deno.test("parser - header", () => {
   const h2 = MsgHdrsImpl.decode(payload!.subarray(0, d.msgs[0].msg?.hdr));
   assert(h2.equals(h));
   assertEquals(td.decode(payload!.subarray(d.msgs[0].msg?.hdr)), "bar");
+});
+
+Deno.test("parser - subject", () => {
+  const d = new TestDispatcher();
+  const p = new Parser(d);
+  p.parse(
+    te.encode(
+      `MSG foo 1 _INBOX.4E66Z7UREYUY9VKDNFBT1A.4E66Z7UREYUY9VKDNFBT72.4E66Z7UREYUY9VKDNFBSVI 102400\r\n`,
+    ),
+  );
+  for (let i = 0; i < 100; i++) {
+    p.parse(new Uint8Array(1024));
+  }
+  assertEquals(p.ma.size, 102400, `size ${p.ma.size}`);
+  assertEquals(p.ma.sid, 1, "sid");
+  assertEquals(p.ma.subject, te.encode("foo"), "subject");
+  assertEquals(
+    p.ma.reply,
+    te.encode(
+      "_INBOX.4E66Z7UREYUY9VKDNFBT1A.4E66Z7UREYUY9VKDNFBT72.4E66Z7UREYUY9VKDNFBSVI",
+    ),
+    "reply",
+  );
 });
 
 Deno.test("parser - msg buffers don't clobber", () => {

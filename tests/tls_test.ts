@@ -15,15 +15,16 @@
 import {
   assertEquals,
   fail,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import { connect, ErrorCode } from "../src/mod.ts";
 import { assertErrorCode, Lock, NatsServer } from "./helpers/mod.ts";
 
-import { join, resolve } from "https://deno.land/std@0.90.0/path/mod.ts";
+import { join, resolve } from "https://deno.land/std@0.125.0/path/mod.ts";
 
 Deno.test("tls - fail if server doesn't support TLS", async () => {
+  const ns = await NatsServer.start();
   const lock = Lock();
-  await connect({ servers: "demo.nats.io:4222", tls: {} })
+  await connect({ port: ns.port, tls: {} })
     .then(() => {
       fail("shouldn't have connected");
     })
@@ -32,6 +33,7 @@ Deno.test("tls - fail if server doesn't support TLS", async () => {
       lock.unlock();
     });
   await lock;
+  await ns.stop();
 });
 
 Deno.test("tls - connects to tls without option", async () => {
@@ -60,6 +62,10 @@ Deno.test("tls - custom ca fails without root", async () => {
     .catch((err) => {
       // this is a bogus error name - but at least we know we are rejected
       assertEquals(err.name, "InvalidData");
+      assertEquals(
+        err.message,
+        "invalid peer certificate contents: invalid peer certificate: UnknownIssuer",
+      );
       lock.unlock();
     });
 

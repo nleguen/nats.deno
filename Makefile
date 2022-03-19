@@ -1,10 +1,15 @@
-.PHONY: build test
+.PHONY: build test bundle lint
 
 build: test
 
-test: clean
+lint:
 	deno lint --unstable
-	deno test --allow-all --unstable --reload --coverage=coverage --failfast tests/
+
+test: clean
+	deno test --allow-all --unstable --reload --jobs --coverage=coverage --fail-fast tests/
+
+testw: clean
+	deno test --allow-all --unstable --reload --jobs --watch --fail-fast tests/
 
 cover:
 	deno coverage --unstable ./coverage --lcov > ./coverage/out.lcov
@@ -13,3 +18,9 @@ cover:
 
 clean:
 	rm -rf ./coverage
+
+bundle:
+	deno bundle --log-level info --unstable src/mod.ts ./nats.js
+
+fmt:
+	deno fmt src/ doc/ bin/ nats-base-client/ examples/ tests/ jetstream.md README.md

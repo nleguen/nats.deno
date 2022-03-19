@@ -1,20 +1,6 @@
 export { NatsConnectionImpl } from "./nats.ts";
 export { Nuid, nuid } from "./nuid.ts";
-export { ErrorCode, NatsError } from "./error.ts";
-export type {
-  Msg,
-  NatsConnection,
-  PublishOptions,
-  RequestOptions,
-  Server,
-  ServerInfo,
-  ServersChanged,
-  Status,
-  Sub,
-  SubOpts,
-  Subscription,
-  SubscriptionOptions,
-} from "./types.ts";
+export { ErrorCode, isNatsError, NatsError } from "./error.ts";
 
 export type {
   AccountLimits,
@@ -22,7 +8,9 @@ export type {
   ConnectionOptions,
   Consumer,
   ConsumerConfig,
+  ConsumerInfo,
   ConsumerOpts,
+  ConsumerOptsBuilder,
   DeliveryInfo,
   JetStreamAccountStats,
   JetStreamApiStats,
@@ -35,15 +23,37 @@ export type {
   JetStreamSubscriptionOptions,
   JsMsg,
   JsMsgCallback,
+  KV,
+  KvCodec,
+  KvCodecs,
+  KvEntry,
+  KvOptions,
+  KvPutOptions,
+  KvRemove,
+  KvStatus,
+  LastForMsgRequest,
   Lister,
   LostStreamData,
+  Msg,
   MsgDeleteRequest,
   MsgRequest,
   Nanos,
+  NatsConnection,
   PeerInfo,
   Placement,
+  PubAck,
+  PublishOptions,
   PullOptions,
-  SequencePair,
+  PurgeOpts,
+  PurgeResponse,
+  RequestOptions,
+  SeqMsgRequest,
+  SequenceInfo,
+  Server,
+  ServerInfo,
+  ServersChanged,
+  Stats,
+  Status,
   StoredMsg,
   StreamConfig,
   StreamInfo,
@@ -51,6 +61,10 @@ export type {
   StreamSource,
   StreamSourceInfo,
   StreamState,
+  Sub,
+  SubOpts,
+  Subscription,
+  SubscriptionOptions,
 } from "./types.ts";
 
 export {
@@ -64,10 +78,10 @@ export {
 } from "./types.ts";
 
 export { consumerOpts } from "./jsconsumeropts.ts";
-export type { ConsumerOptsBuilder } from "./jsconsumeropts.ts";
 export { toJsMsg } from "./jsmsg.ts";
+export type { JetStreamSubscriptionInfoable } from "./jsclient.ts";
 
-export { DebugEvents, Empty, Events } from "./types.ts";
+export { DebugEvents, Empty, Events, JsHeaders } from "./types.ts";
 export { MsgImpl } from "./msg.ts";
 export { SubscriptionImpl } from "./subscription.ts";
 export { Subscriptions } from "./subscriptions.ts";
@@ -76,6 +90,7 @@ export type { Transport, TransportFactory } from "./transport.ts";
 export { Connect, createInbox, INFO, ProtocolHandler } from "./protocol.ts";
 export type { Deferred, Timeout } from "./util.ts";
 export {
+  collect,
   deferred,
   delay,
   extend,
@@ -84,7 +99,12 @@ export {
   timeout,
 } from "./util.ts";
 export type { MsgHdrs } from "./headers.ts";
-export { headers, MsgHdrsImpl } from "./headers.ts";
+export {
+  canonicalMIMEHeaderKey,
+  headers,
+  Match,
+  MsgHdrsImpl,
+} from "./headers.ts";
 export { Heartbeat } from "./heartbeats.ts";
 export type { PH } from "./heartbeats.ts";
 export { MuxSubscription } from "./muxsubscription.ts";
@@ -101,6 +121,7 @@ export type { Codec } from "./codec.ts";
 export { JSONCodec, StringCodec } from "./codec.ts";
 export * from "./nkeys.ts";
 export type { DispatchedFn, Dispatcher } from "./queued_iterator.ts";
+export { QueuedIteratorImpl } from "./queued_iterator.ts";
 export type { QueuedIterator } from "./queued_iterator.ts";
 export type { ParserEvent } from "./parser.ts";
 export { Kind, Parser, State } from "./parser.ts";
@@ -111,4 +132,20 @@ export { TD, TE } from "./encoders.ts";
 export { isIP, parseIP } from "./ipparser.ts";
 export { TypedSubscription } from "./typedsub.ts";
 export type { TypedSubscriptionOptions } from "./typedsub.ts";
-export { millis, nanos } from "./jsutil.ts";
+export {
+  checkJsError,
+  isFlowControlMsg,
+  isHeartbeatMsg,
+  millis,
+  nanos,
+} from "./jsutil.ts";
+export {
+  Base64KeyCodec,
+  Bucket,
+  defaultBucketOpts,
+  NoopKvCodecs,
+} from "./kv.ts";
+
+export type { SemVer } from "./semver.ts";
+
+export { compare, parseSemVer } from "./semver.ts";

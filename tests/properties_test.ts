@@ -16,14 +16,15 @@ import {
   assert,
   assertEquals,
   assertMatch,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 
-import { connect } from "../src/mod.ts";
+import { connect, ConnectionOptions } from "../src/mod.ts";
 import { DenoTransport } from "../src/deno_transport.ts";
-import { Connect } from "../nats-base-client/internal_mod.ts";
+import { Connect } from "../nats-base-client/protocol.ts";
 import { buildAuthenticator } from "../nats-base-client/authenticator.ts";
 import { extend } from "../nats-base-client/util.ts";
-import { defaultOptions } from "../nats-base-client/options.ts";
+import { defaultOptions, parseOptions } from "../nats-base-client/options.ts";
+import { Servers } from "../nats-base-client/servers.ts";
 
 const { version, lang } = new DenoTransport();
 
@@ -118,4 +119,19 @@ Deno.test("properties - tls doesn't leak options", () => {
   assertEquals(cc.certFile, undefined);
   assertEquals(cc.caFile, undefined);
   assertEquals(cc.tls, undefined);
+});
+
+Deno.test("properties - port is only honored if no servers provided", () => {
+  type test = { opts?: ConnectionOptions; expected: string };
+  const buf: test[] = [];
+  buf.push({ expected: "127.0.0.1:4222" });
+  buf.push({ opts: {}, expected: "127.0.0.1:4222" });
+  buf.push({ opts: { port: 9999 }, expected: "127.0.0.1:9999" });
+
+  buf.forEach((t) => {
+    const opts = parseOptions(t.opts);
+    const servers = new Servers(opts.servers as string[], {});
+    const cs = servers.getCurrentServer();
+    assertEquals(cs.listen, t.expected);
+  });
 });

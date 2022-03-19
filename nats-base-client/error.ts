@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+import { ApiError } from "./types.ts";
+
 export enum ErrorCode {
   // emitted by the client
   ApiError = "BAD API",
@@ -93,15 +95,17 @@ export class NatsError extends Error {
   message: string;
   code: string;
   chainedError?: Error;
+  // these are for supporting jetstream
+  api_error?: ApiError;
 
   /**
-     * @param {String} message
-     * @param {String} code
-     * @param {Error} [chainedError]
-     * @constructor
-     *
-     * @api private
-     */
+   * @param {String} message
+   * @param {String} code
+   * @param {Error} [chainedError]
+   * @constructor
+   *
+   * @api private
+   */
   constructor(message: string, code: string, chainedError?: Error) {
     super(message);
     this.name = "NatsError";
@@ -126,5 +130,13 @@ export class NatsError extends Error {
 
   isProtocolError(): boolean {
     return this.code === ErrorCode.ProtocolError;
+  }
+
+  isJetStreamError(): boolean {
+    return this.api_error !== undefined;
+  }
+
+  jsError(): ApiError | null {
+    return this.api_error ? this.api_error : null;
   }
 }

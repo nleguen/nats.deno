@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 import { JSONCodec, StringCodec } from "../nats-base-client/codec.ts";
-import { assertEquals } from "https://deno.land/std@0.90.0/testing/asserts.ts";
+import { assertEquals } from "https://deno.land/std@0.125.0/testing/asserts.ts";
 
 Deno.test("codec - string", () => {
   const sc = StringCodec();
@@ -24,6 +24,13 @@ Deno.test("codec - string", () => {
 Deno.test("codec - json", () => {
   const sc = JSONCodec();
   const o = { hello: "world" };
+  const d = sc.encode(o);
+  assertEquals(sc.decode(d), o);
+});
+
+Deno.test("codec - json w/ reviver", () => {
+  const sc = JSONCodec((k: string, v: any) => k === "time" ? new Date(v) : v);
+  const o = { time: new Date() };
   const d = sc.encode(o);
   assertEquals(sc.decode(d), o);
 });

@@ -32,7 +32,11 @@ const defaultPrefix = "$JS.API";
 const defaultTimeout = 5000;
 
 export function defaultJsOptions(opts?: JetStreamOptions): JetStreamOptions {
-  opts = opts ?? {} as JetStreamOptions;
+  opts = opts || {} as JetStreamOptions;
+  if (opts.domain) {
+    opts.apiPrefix = `$JS.${opts.domain}.API`;
+    delete opts.domain;
+  }
   return extend({ apiPrefix: defaultPrefix, timeout: defaultTimeout }, opts);
 }
 
@@ -101,6 +105,7 @@ export class BaseApiClient {
     if (r.error) {
       const err = checkJsErrorCode(r.error.code, r.error.description);
       if (err !== null) {
+        err.api_error = r.error;
         throw err;
       }
     }

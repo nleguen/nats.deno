@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2021 The NATS Authors
+ * Copyright 2020-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -149,6 +149,7 @@ export interface ServerInfo {
   "auth_required"?: boolean;
   "client_id": number;
   "client_ip"?: string;
+  cluster?: string;
   "connect_urls"?: string[];
   "git_commit"?: string;
   go: string;
@@ -174,6 +175,10 @@ export interface Server {
   listen: string;
   src: string;
   tlsName: string;
+
+  resolve(
+    opts: Partial<{ fn: DnsResolveFn; randomize: boolean }>,
+  ): Promise<Server[]>;
 }
 
 export interface ServersChanged {
@@ -182,6 +187,7 @@ export interface ServersChanged {
 }
 
 export interface Sub<T> extends AsyncIterable<T> {
+  closed: Promise<void>;
   unsubscribe(max?: number): void;
   drain(): Promise<void>;
   isDraining(): boolean;
@@ -220,10 +226,15 @@ export interface URLParseFn {
   (u: string): string;
 }
 
+export interface DnsResolveFn {
+  (h: string): Promise<string[]>;
+}
+
 // JetStream
 export interface JetStreamOptions {
   apiPrefix?: string;
   timeout?: number;
+  domain?: string;
 }
 
 export interface JetStreamManager {
@@ -241,6 +252,7 @@ export interface PullOptions {
 
 export interface PubAck {
   stream: string;
+  domain?: string;
   seq: number;
   duplicate: boolean;
 
@@ -251,10 +263,12 @@ export interface JetStreamPublishOptions {
   msgID: string;
   timeout: number;
   ackWait: Nanos;
+  headers: MsgHdrs;
   expect: Partial<{
     lastMsgID: string;
     streamName: string;
     lastSequence: number;
+    lastSubjectSequence: number;
   }>;
 }
 
@@ -286,6 +300,10 @@ export type JetStreamPullSubscription = JetStreamSubscription & Pullable;
 
 export type JsMsgCallback = (err: NatsError | null, msg: JsMsg | null) => void;
 
+export interface Views {
+  kv: (name: string, opts?: Partial<KvOptions>) => Promise<KV>;
+}
+
 // FIXME: pulls must limit to maxAcksInFlight
 export interface JetStreamClient {
   publish(
@@ -307,39 +325,95 @@ export interface JetStreamClient {
     subject: string,
     opts: ConsumerOptsBuilder | Partial<ConsumerOpts>,
   ): Promise<JetStreamSubscription>;
+  views: Views;
 }
 
 export interface ConsumerOpts {
   config: Partial<ConsumerConfig>;
   mack: boolean;
-  subQueue: string;
   stream: string;
   callbackFn?: JsMsgCallback;
   name?: string;
+  ordered: boolean;
 
   // standard
   max?: number;
+  queue?: string;
   debug?: boolean;
+  isBind?: boolean;
 }
 
 export interface ConsumerOptsBuilder {
+  // user description of this consumer
+  description(description: string): void;
+  // deliverTo sets the subject a push consumer receives messages on
   deliverTo(subject: string): void;
-  manualAck(): void;
+  // sets the durable name, when not set an ephemeral consumer is created
   durable(name: string): void;
-  deliverAll(): void;
-  deliverLast(): void;
-  deliverNew(): void;
+  // consumer will start at the message with the specified sequence
   startSequence(seq: number): void;
-  startTime(time: Date | Nanos): void;
+  // consumer will start with messages received on the specified time/date
+  startTime(time: Date): void;
+  // consumer will start at first available message on the stream
+  deliverAll(): void;
+  // consumer will deliver all the last per messages per subject
+  deliverLastPerSubject(): void;
+  // consumer will start at the last message
+  deliverLast(): void;
+  // consumer will start with new messages (not yet in the stream)
+  deliverNew(): void;
+  // start delivering at the at a past point in time
+  startAtTimeDelta(millis: number): void;
+  // deliver headers and `Nats-Msg-Size` header, no payloads
+  headersOnly(): void;
+  // disables message acknowledgement
   ackNone(): void;
+  // ack'ing a message implicitly acks all messages with a lower sequence
   ackAll(): void;
+  // consumer will ack all messages
   ackExplicit(): void;
+  // sets teh time a delivered message might remain unacknowledged before redelivery is attempted
+  ackWait(millis: number): void;
+  // max number of re-delivery attempts for a particular message
   maxDeliver(max: number): void;
-  maxAckPending(max: number): void;
-  // FIXME: pullMaxWaiting
+  // filters the messages in a wildcard stream to those matching a specific subject
+  filterSubject(s: string): void;
+  // replay messages as fast as possible
+  replayInstantly(): void;
+  // replay at the rate received
+  replayOriginal(): void;
+  // sample a subset of messages expressed as a percentage(0-100)
+  sample(n: number): void;
+  // limit message delivery to rate in bits per second
+  limit(bps: number): void;
+  // max count of outstanding messages scheduled via batch pulls (pulls are additive)
   maxWaiting(max: number): void;
+  // max number of outstanding acks before the server stops sending new messages
+  maxAckPending(max: number): void;
+  // sets the time before an idle consumer sends an empty message with status 100 indicating consumer is alive
+  idleHeartbeat(millis: number): void;
+  // push consumer flow control - server sends a status code 100 and uses the delay on the response to throttle inbound messages for a client and prevent slow consumer.
+  flowControl(): void;
+  // sets the name of the queue group - same as queue
+  deliverGroup(name: string): void;
+  // prevents the consumer implementation from auto-acking messages
+  manualAck(): void;
+  // standard nats subscribe option for the maximum number of messages to receive on the subscription
   maxMessages(max: number): void;
+  // standard nats queue group option
+  queue(n: string): void;
+  // callback to process messages (or iterator is returned)
   callback(fn: JsMsgCallback): void;
+  // creates an ordered consumer - ordered consumers cannot be a pull consumer nor specify durable, deliverTo, specify an ack policy, maxDeliver, or flow control.
+  orderedConsumer(): void;
+  // binds to a consumer
+  bind(stream: string, durable: string): void;
+  // max number of messages to be delivered to a pull consumer (pull consumer only)
+  maxPullBatch(n: number): void;
+  // max amount of time before a pull request expires
+  maxPullRequestExpires(millis: number): void;
+  // max amount of time before an inactive ephemeral consumer is discarded
+  inactiveEphemeralThreshold(millis: number): void;
 }
 
 export interface Lister<T> {
@@ -349,19 +423,31 @@ export interface Lister<T> {
 export interface ConsumerAPI {
   info(stream: string, consumer: string): Promise<ConsumerInfo>;
   add(stream: string, cfg: Partial<ConsumerConfig>): Promise<ConsumerInfo>;
+  update(
+    stream: string,
+    durable: string,
+    cfg: ConsumerUpdateConfig,
+  ): Promise<ConsumerInfo>;
   delete(stream: string, consumer: string): Promise<boolean>;
   list(stream: string): Lister<ConsumerInfo>;
 }
 
+export type StreamInfoRequestOptions = {
+  "deleted_details": boolean;
+};
+
 export interface StreamAPI {
-  info(stream: string): Promise<StreamInfo>;
+  info(
+    stream: string,
+    opts?: Partial<StreamInfoRequestOptions>,
+  ): Promise<StreamInfo>;
   add(cfg: Partial<StreamConfig>): Promise<StreamInfo>;
-  update(cfg: StreamConfig): Promise<StreamInfo>;
-  purge(stream: string): Promise<PurgeResponse>;
+  update(name: string, cfg: Partial<StreamUpdateConfig>): Promise<StreamInfo>;
+  purge(stream: string, opts?: PurgeOpts): Promise<PurgeResponse>;
   delete(stream: string): Promise<boolean>;
   list(): Lister<StreamInfo>;
-  deleteMessage(stream: string, seq: number): Promise<boolean>;
-  getMessage(stream: string, seq: number): Promise<StoredMsg>;
+  deleteMessage(stream: string, seq: number, erase?: boolean): Promise<boolean>;
+  getMessage(stream: string, query: MsgRequest): Promise<StoredMsg>;
   find(subject: string): Promise<string>;
 }
 
@@ -375,7 +461,7 @@ export interface JsMsg {
   sid: number;
 
   ack(): void;
-  nak(): void;
+  nak(millis?: number): void;
   working(): void;
   // next(subj?: string): void;
   term(): void;
@@ -383,6 +469,8 @@ export interface JsMsg {
 }
 
 export interface DeliveryInfo {
+  domain: string;
+  "account_hash"?: string;
   stream: string;
   consumer: string;
   redeliveryCount: number;
@@ -430,6 +518,7 @@ export type Nanos = number;
 export interface ApiError {
   code: number;
   description: string;
+  err_code?: number;
 }
 
 export interface ApiResponse {
@@ -456,31 +545,40 @@ export interface StreamInfo {
   sources?: StreamSourceInfo[];
 }
 
-export interface StreamConfig {
+export interface StreamConfig extends StreamUpdateConfig {
   name: string;
-  subjects?: string[];
   retention: RetentionPolicy;
-  "max_consumers": number;
-  "max_msgs": number;
-  "max_bytes": number;
-  discard?: DiscardPolicy;
-  "max_age": number;
-  "max_msg_size"?: number;
   storage: StorageType;
   "num_replicas": number;
-  "no_ack"?: boolean;
   "template_owner"?: string;
-  "duplicate_window"?: number; // duration
+  "max_consumers": number;
   placement?: Placement;
   mirror?: StreamSource; // same as a source
+  sealed: boolean;
+  "deny_delete": boolean;
+  "deny_purge": boolean;
+}
+
+export interface StreamUpdateConfig {
+  subjects: string[];
+  description?: string;
+  "max_msgs_per_subject": number;
+  "max_msgs": number;
+  "max_age": Nanos;
+  "max_bytes": number;
+  "max_msg_size": number;
+  discard: DiscardPolicy;
+  "no_ack"?: boolean;
+  "duplicate_window": Nanos;
   sources?: StreamSource[];
+  "allow_rollup_hdrs": boolean;
 }
 
 export interface StreamSource {
   name: string;
-  "opt_start_seq": number;
-  "opt_start_time": string;
-  "filter_subject": string;
+  "opt_start_seq"?: number;
+  "opt_start_time"?: string;
+  "filter_subject"?: string;
 }
 
 export interface Placement {
@@ -510,6 +608,7 @@ export enum DeliverPolicy {
   New = "new",
   StartSequence = "by_start_sequence",
   StartTime = "by_start_time",
+  LastPerSubject = "last_per_subject",
 }
 
 export enum AckPolicy {
@@ -531,6 +630,7 @@ export interface StreamState {
   "first_ts": number;
   "last_seq": number;
   "last_ts": string;
+  "num_deleted": number;
   deleted: number[];
   lost: LostStreamData;
   "consumer_count": number;
@@ -562,6 +662,25 @@ export interface StreamSourceInfo {
   error?: ApiError;
 }
 
+export type PurgeOpts = PurgeBySeq | PurgeTrimOpts | PurgeBySubject;
+
+export type PurgeBySeq = {
+  // a subject to filter on (can include wildcards)
+  filter?: string;
+  // not inclusive
+  seq: number;
+};
+
+export type PurgeTrimOpts = {
+  // a subject to filter on (can include wildcards)
+  filter?: string;
+  keep: number;
+};
+
+export type PurgeBySubject = {
+  filter: string;
+};
+
 export interface PurgeResponse extends Success {
   purged: number;
 }
@@ -581,9 +700,10 @@ export interface StreamMsgResponse extends ApiResponse {
   };
 }
 
-export interface SequencePair {
+export interface SequenceInfo {
   "consumer_seq": number;
   "stream_seq": number;
+  "last_active": Nanos;
 }
 
 export interface ConsumerInfo {
@@ -591,8 +711,8 @@ export interface ConsumerInfo {
   name: string;
   created: number;
   config: ConsumerConfig;
-  delivered: SequencePair;
-  "ack_floor": SequencePair;
+  delivered: SequenceInfo;
+  "ack_floor": SequenceInfo;
   "num_ack_pending": number;
   "num_redelivered": number;
   "num_waiting": number;
@@ -614,11 +734,18 @@ export interface Success {
 
 export type SuccessResponse = ApiResponse & Success;
 
-export interface MsgRequest {
+export interface LastForMsgRequest {
+  "last_by_subj": string;
+}
+
+export interface SeqMsgRequest {
   seq: number;
 }
 
-export interface MsgDeleteRequest extends MsgRequest {
+// FIXME: remove number as it is deprecated
+export type MsgRequest = SeqMsgRequest | LastForMsgRequest | number;
+
+export interface MsgDeleteRequest extends SeqMsgRequest {
   "no_erase"?: boolean;
 }
 
@@ -629,6 +756,7 @@ export interface JetStreamAccountStats {
   consumers: number;
   api: JetStreamApiStats;
   limits: AccountLimits;
+  domain?: string;
 }
 
 export interface JetStreamApiStats {
@@ -646,22 +774,32 @@ export interface AccountLimits {
   "max_consumers": number;
 }
 
-export interface ConsumerConfig {
-  name: string;
-  "durable_name"?: string;
-  "deliver_subject"?: string;
+export interface ConsumerConfig extends ConsumerUpdateConfig {
+  "ack_policy": AckPolicy;
   "deliver_policy": DeliverPolicy;
+  "deliver_group"?: string;
+  "durable_name"?: string;
+  "filter_subject"?: string;
+  "flow_control"?: boolean; // send message with status of 100 and reply subject
+  "idle_heartbeat"?: Nanos; // send empty message when idle longer than this
   "opt_start_seq"?: number;
   "opt_start_time"?: string;
-  "ack_policy": AckPolicy;
-  "ack_wait"?: number;
-  "max_deliver"?: number;
-  "filter_subject"?: string;
-  "replay_policy": ReplayPolicy;
   "rate_limit_bps"?: number;
+  "replay_policy": ReplayPolicy;
+}
+
+export interface ConsumerUpdateConfig {
+  description?: string;
+  "ack_wait"?: Nanos;
+  "max_deliver"?: number;
   "sample_freq"?: string;
-  "max_waiting"?: number;
   "max_ack_pending"?: number;
+  "max_waiting"?: number;
+  "headers_only"?: boolean;
+  "deliver_subject"?: string;
+  "max_batch"?: number;
+  "max_expires"?: Nanos;
+  "inactive_threshold"?: Nanos;
 }
 
 export interface Consumer {
@@ -682,3 +820,102 @@ export interface NextRequest {
   batch: number;
   "no_wait": boolean;
 }
+
+export enum JsHeaders {
+  // set if message coming from a stream source format is `stream seq`
+  StreamSourceHdr = "Nats-Stream-Source",
+  // set for heartbeat messages
+  LastConsumerSeqHdr = "Nats-Last-Consumer",
+  // set for heartbeat messages
+  LastStreamSeqHdr = "Nats-Last-Stream",
+  // set for heartbeat messages if stalled
+  ConsumerStalledHdr = "Nats-Consumer-Stalled",
+  // set for headers_only consumers indicates number
+  MessageSizeHdr = "Nats-Msg-Size",
+  // rollup header
+  RollupHdr = "Nats-Rollup",
+  // value for rollup header when rolling up a subject
+  RollupValueSubject = "sub",
+  // value for rollup header when rolling up all subjects
+  RollupValueAll = "all",
+}
+
+export interface KvEntry {
+  bucket: string;
+  key: string;
+  value: Uint8Array;
+  created: Date;
+  revision: number;
+  delta?: number;
+  operation: "PUT" | "DEL" | "PURGE";
+  length: number;
+}
+
+export interface KvCodec<T> {
+  encode(k: T): T;
+  decode(k: T): T;
+}
+
+export interface KvCodecs {
+  key: KvCodec<string>;
+  value: KvCodec<Uint8Array>;
+}
+
+export interface KvStatus {
+  bucket: string;
+  values: number;
+  history: number;
+  ttl: Nanos;
+  backingStore: StorageType;
+}
+
+export interface KvOptions {
+  replicas: number;
+  history: number;
+  timeout: number;
+  maxBucketSize: number;
+  maxValueSize: number;
+  placementCluster: string;
+  mirrorBucket: string;
+  ttl: number; // millis
+  streamName: string;
+  codec: KvCodecs;
+  storage: StorageType;
+}
+
+/**
+ * @deprecated use purge(k)
+ */
+export interface KvRemove {
+  remove(k: string): Promise<void>;
+}
+
+export interface RoKV {
+  get(k: string): Promise<KvEntry | null>;
+  history(opts?: { key?: string }): Promise<QueuedIterator<KvEntry>>;
+  watch(
+    opts?: { key?: string; headers_only?: boolean; initializedFn?: callbackFn },
+  ): Promise<QueuedIterator<KvEntry>>;
+  close(): Promise<void>;
+  status(): Promise<KvStatus>;
+  keys(k?: string): Promise<QueuedIterator<string>>;
+}
+
+export interface KV extends RoKV {
+  create(k: string, data: Uint8Array): Promise<number>;
+  update(k: string, data: Uint8Array, version: number): Promise<number>;
+  put(
+    k: string,
+    data: Uint8Array,
+    opts?: Partial<KvPutOptions>,
+  ): Promise<number>;
+  delete(k: string): Promise<void>;
+  purge(k: string): Promise<void>;
+  destroy(): Promise<boolean>;
+}
+
+export interface KvPutOptions {
+  previousSeq: number;
+}
+
+export type callbackFn = () => void;

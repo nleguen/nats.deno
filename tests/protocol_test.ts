@@ -27,7 +27,7 @@ import { assertErrorCode } from "./helpers/mod.ts";
 import {
   assertEquals,
   equal,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import { protoLen } from "../nats-base-client/util.ts";
 
 Deno.test("protocol - mux subscription unknown return null", async () => {
@@ -59,7 +59,10 @@ Deno.test("protocol - bad dispatch is noop", () => {
 
 Deno.test("protocol - subs all", () => {
   const subs = new Subscriptions();
-  const s = new SubscriptionImpl({} as ProtocolHandler, "hello");
+
+  const s = new SubscriptionImpl({
+    unsubscribe(_s: SubscriptionImpl, _max?: number) {},
+  } as ProtocolHandler, "hello");
   subs.add(s);
   assertEquals(subs.size(), 1);
   assertEquals(s.sid, 1);
@@ -73,7 +76,9 @@ Deno.test("protocol - subs all", () => {
 
 Deno.test("protocol - cancel unknown sub", () => {
   const subs = new Subscriptions();
-  const s = new SubscriptionImpl({} as ProtocolHandler, "hello");
+  const s = new SubscriptionImpl({
+    unsubscribe(_s: SubscriptionImpl, _max?: number) {},
+  } as ProtocolHandler, "hello");
   assertEquals(subs.size(), 0);
   subs.add(s);
   assertEquals(subs.size(), 1);
@@ -82,6 +87,6 @@ Deno.test("protocol - cancel unknown sub", () => {
 });
 
 Deno.test("protocol - protolen -1 on empty", () => {
-  assertEquals(protoLen(Empty), -1);
+  assertEquals(protoLen(Empty), 0);
   assertEquals(extractProtocolMessage(Empty), "");
 });

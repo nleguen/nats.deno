@@ -17,56 +17,41 @@ import {
   AckPolicy,
   ConsumerConfig,
   ConsumerOpts,
+  ConsumerOptsBuilder,
   DeliverPolicy,
   JsMsgCallback,
-  Nanos,
+  ReplayPolicy,
 } from "./types.ts";
-import { defaultConsumer, validateDurableName } from "./jsutil.ts";
+import { defaultConsumer, nanos, validateDurableName } from "./jsutil.ts";
 
-export interface ConsumerOptsBuilder {
-  deliverTo(subject: string): void;
-  manualAck(): void;
-  durable(name: string): void;
-  deliverAll(): void;
-  deliverLast(): void;
-  deliverNew(): void;
-  startSequence(seq: number): void;
-  startTime(time: Date | Nanos): void;
-  ackNone(): void;
-  ackAll(): void;
-  ackExplicit(): void;
-  maxDeliver(max: number): void;
-  maxAckPending(max: number): void;
-  maxWaiting(max: number): void;
-  maxMessages(max: number): void;
-  callback(fn: JsMsgCallback): void;
-
-  // FIXME: 503:
-  // maxRetries()
-  // retryBackoff()
-
-  // ackWait(time)
-  // replayOriginal()
-  // rateLimit(bytesPerSec)
+export function consumerOpts(
+  opts?: Partial<ConsumerConfig>,
+): ConsumerOptsBuilder {
+  return new ConsumerOptsBuilderImpl(opts);
 }
 
-export function consumerOpts(): ConsumerOptsBuilder {
-  return new ConsumerOptsBuilderImpl();
-}
-
+// FIXME: some items here that may need to be addressed
+// 503s?
+// maxRetries()
+// retryBackoff()
+// ackWait(time)
+// replayOriginal()
+// rateLimit(bytesPerSec)
 export class ConsumerOptsBuilderImpl implements ConsumerOptsBuilder {
   config: Partial<ConsumerConfig>;
+  ordered: boolean;
   mack: boolean;
   stream: string;
   callbackFn?: JsMsgCallback;
   max?: number;
+  qname?: string;
+  isBind?: boolean;
 
-  constructor() {
+  constructor(opts?: Partial<ConsumerConfig>) {
     this.stream = "";
     this.mack = false;
-    this.config = defaultConsumer("");
-    // not set
-    this.config.ack_policy = AckPolicy.All;
+    this.ordered = false;
+    this.config = defaultConsumer("", opts || {});
   }
 
   getOpts(): ConsumerOpts {
@@ -76,32 +61,24 @@ export class ConsumerOptsBuilderImpl implements ConsumerOptsBuilder {
     o.stream = this.stream;
     o.callbackFn = this.callbackFn;
     o.max = this.max;
+    o.queue = this.qname;
+    o.ordered = this.ordered;
+    o.config.ack_policy = o.ordered ? AckPolicy.None : o.config.ack_policy;
+    o.isBind = o.isBind || false;
     return o;
+  }
+
+  description(description: string) {
+    this.config.description = description;
   }
 
   deliverTo(subject: string) {
     this.config.deliver_subject = subject;
   }
 
-  manualAck() {
-    this.mack = true;
-  }
-
   durable(name: string) {
     validateDurableName(name);
     this.config.durable_name = name;
-  }
-
-  deliverAll() {
-    this.config.deliver_policy = DeliverPolicy.All;
-  }
-
-  deliverLast() {
-    this.config.deliver_policy = DeliverPolicy.Last;
-  }
-
-  deliverNew() {
-    this.config.deliver_policy = DeliverPolicy.New;
   }
 
   startSequence(seq: number) {
@@ -117,6 +94,30 @@ export class ConsumerOptsBuilderImpl implements ConsumerOptsBuilder {
     this.config.opt_start_time = time.toISOString();
   }
 
+  deliverAll() {
+    this.config.deliver_policy = DeliverPolicy.All;
+  }
+
+  deliverLastPerSubject() {
+    this.config.deliver_policy = DeliverPolicy.LastPerSubject;
+  }
+
+  deliverLast() {
+    this.config.deliver_policy = DeliverPolicy.Last;
+  }
+
+  deliverNew() {
+    this.config.deliver_policy = DeliverPolicy.New;
+  }
+
+  startAtTimeDelta(millis: number) {
+    this.startTime(new Date(Date.now() - millis));
+  }
+
+  headersOnly() {
+    this.config.headers_only = true;
+  }
+
   ackNone() {
     this.config.ack_policy = AckPolicy.None;
   }
@@ -129,16 +130,60 @@ export class ConsumerOptsBuilderImpl implements ConsumerOptsBuilder {
     this.config.ack_policy = AckPolicy.Explicit;
   }
 
+  ackWait(millis: number) {
+    this.config.ack_wait = nanos(millis);
+  }
+
   maxDeliver(max: number) {
     this.config.max_deliver = max;
+  }
+
+  filterSubject(s: string) {
+    this.config.filter_subject = s;
+  }
+
+  replayInstantly() {
+    this.config.replay_policy = ReplayPolicy.Instant;
+  }
+
+  replayOriginal() {
+    this.config.replay_policy = ReplayPolicy.Original;
+  }
+
+  sample(n: number) {
+    n = Math.trunc(n);
+    if (n < 0 || n > 100) {
+      throw new Error(`value must be between 0-100`);
+    }
+    this.config.sample_freq = `${n}%`;
+  }
+
+  limit(n: number) {
+    this.config.rate_limit_bps = n;
+  }
+
+  maxWaiting(max: number) {
+    this.config.max_waiting = max;
   }
 
   maxAckPending(max: number) {
     this.config.max_ack_pending = max;
   }
 
-  maxWaiting(max: number) {
-    this.config.max_waiting = max;
+  idleHeartbeat(millis: number) {
+    this.config.idle_heartbeat = nanos(millis);
+  }
+
+  flowControl() {
+    this.config.flow_control = true;
+  }
+
+  deliverGroup(name: string) {
+    this.queue(name);
+  }
+
+  manualAck() {
+    this.mack = true;
   }
 
   maxMessages(max: number) {
@@ -147,6 +192,33 @@ export class ConsumerOptsBuilderImpl implements ConsumerOptsBuilder {
 
   callback(fn: JsMsgCallback) {
     this.callbackFn = fn;
+  }
+
+  queue(n: string) {
+    this.qname = n;
+    this.config.deliver_group = n;
+  }
+
+  orderedConsumer() {
+    this.ordered = true;
+  }
+
+  bind(stream: string, durable: string) {
+    this.stream = stream;
+    this.config.durable_name = durable;
+    this.isBind = true;
+  }
+
+  inactiveEphemeralThreshold(millis: number): void {
+    this.config.inactive_threshold = nanos(millis);
+  }
+
+  maxPullBatch(n: number): void {
+    this.config.max_batch = n;
+  }
+
+  maxPullRequestExpires(millis: number): void {
+    this.config.max_expires = nanos(millis);
   }
 }
 

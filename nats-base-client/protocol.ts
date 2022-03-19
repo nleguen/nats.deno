@@ -21,11 +21,12 @@ import {
   Empty,
   Events,
   PublishOptions,
+  Server,
   ServerInfo,
   Status,
   Subscription,
 } from "./types.ts";
-import { newTransport, Transport } from "./transport.ts";
+import { getResolveFn, newTransport, Transport } from "./transport.ts";
 import { ErrorCode, NatsError } from "./error.ts";
 import {
   CR_LF,
@@ -52,7 +53,7 @@ import type { Request } from "./request.ts";
 import { Heartbeat, PH } from "./heartbeats.ts";
 import { Kind, MsgArg, Parser, ParserEvent } from "./parser.ts";
 import { MsgImpl } from "./msg.ts";
-import { fastDecoder, fastEncoder } from "./encoders.ts";
+import { decode, encode } from "./encoders.ts";
 
 const FLUSH_THRESHOLD = 1024 * 32;
 
@@ -66,8 +67,8 @@ export function createInbox(prefix = ""): string {
   return `${prefix}.${nuid.next()}`;
 }
 
-const PONG_CMD = fastEncoder("PONG\r\n");
-const PING_CMD = fastEncoder("PING\r\n");
+const PONG_CMD = encode("PONG\r\n");
+const PING_CMD = encode("PING\r\n");
 
 export class Connect {
   echo?: boolean;
@@ -166,11 +167,14 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     this.pongs = [];
     //@ts-ignore: options.pendingLimit is hidden
     this.pendingLimit = options.pendingLimit || this.pendingLimit;
-    this.servers = new Servers(
-      !options.noRandomize,
-      //@ts-ignore: servers should be a list
-      options.servers,
-    );
+
+    const servers = typeof options.servers === "string"
+      ? [options.servers]
+      : options.servers;
+
+    this.servers = new Servers(servers, {
+      randomize: !options.noRandomize,
+    });
     this.closed = deferred<Error | void>();
     this.parser = new Parser(this);
 
@@ -218,7 +222,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
 
     this.transport = newTransport();
     this.transport.closed()
-      .then(async (err?) => {
+      .then(async (_err?) => {
         this.connected = false;
         if (!this.isClosed()) {
           await this.disconnected(this.transport.closeError);
@@ -234,7 +238,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     this.transport.disconnect();
   }
 
-  async disconnected(err?: Error): Promise<void> {
+  async disconnected(_err?: Error): Promise<void> {
     this.dispatchStatus(
       {
         type: Events.Disconnect,
@@ -259,7 +263,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     }
   }
 
-  async dial(srv: ServerImpl): Promise<void> {
+  async dial(srv: Server): Promise<void> {
     const pong = this.prepare();
     let timer;
     try {
@@ -301,6 +305,31 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     }
   }
 
+  async _doDial(srv: Server): Promise<void> {
+    const alts = await srv.resolve({
+      fn: getResolveFn(),
+      randomize: !this.options.noRandomize,
+    });
+
+    let lastErr: Error | null = null;
+    for (const a of alts) {
+      try {
+        lastErr = null;
+        this.dispatchStatus(
+          { type: DebugEvents.Reconnecting, data: a.toString() },
+        );
+        await this.dial(a);
+        // if here we connected
+        return;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    // if we are here, we failed, and we have no additional
+    // alternatives for this server
+    throw lastErr;
+  }
+
   async dialLoop(): Promise<void> {
     let lastError: Error | undefined;
     while (true) {
@@ -316,10 +345,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       if (srv.lastConnect === 0 || srv.lastConnect + wait <= now) {
         srv.lastConnect = Date.now();
         try {
-          this.dispatchStatus(
-            { type: DebugEvents.Reconnecting, data: srv.toString() },
-          );
-          await this.dial(srv);
+          await this._doDial(srv);
           break;
         } catch (err) {
           lastError = err;
@@ -387,12 +413,10 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   }
 
   async processError(m: Uint8Array) {
-    const s = fastDecoder(m);
+    const s = decode(m);
     const err = ProtocolHandler.toError(s);
-    const handled = this.subscriptions.handleError(err);
-    if (!handled) {
-      this.dispatchStatus({ type: Events.Error, data: err.code });
-    }
+    this.subscriptions.handleError(err);
+    this.dispatchStatus({ type: Events.Error, data: err.code });
     await this.handleError(err);
   }
 
@@ -400,7 +424,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     if (err.isAuthError()) {
       this.handleAuthError(err);
     }
-    if (err.isPermissionError() || err.isProtocolError()) {
+    if (err.isProtocolError()) {
       await this._close(err);
     }
     this.lastError = err;
@@ -429,7 +453,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
   }
 
   processInfo(m: Uint8Array) {
-    const info = JSON.parse(fastDecoder(m));
+    const info = JSON.parse(decode(m));
     this.info = info;
     const updates = this.options && this.options.ignoreClusterUpdates
       ? undefined
@@ -454,7 +478,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
         }
         const cs = JSON.stringify(c);
         this.transport.send(
-          fastEncoder(`CONNECT ${cs}${CR_LF}`),
+          encode(`CONNECT ${cs}${CR_LF}`),
         );
         this.transport.send(PING_CMD);
       } catch (err) {
@@ -505,7 +529,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     const len = this.outbound.length();
     let buf: Uint8Array;
     if (typeof cmd === "string") {
-      buf = fastEncoder(cmd);
+      buf = encode(cmd);
     } else {
       buf = cmd as Uint8Array;
     }
@@ -525,13 +549,6 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     data: Uint8Array,
     options?: PublishOptions,
   ) {
-    if (this.isClosed()) {
-      throw NatsError.errorForCode(ErrorCode.ConnectionClosed);
-    }
-    if (this.noMorePublishing) {
-      throw NatsError.errorForCode(ErrorCode.ConnectionDraining);
-    }
-
     let len = data.length;
     options = options || {};
     options.reply = options.reply || "";
@@ -549,7 +566,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     }
 
     if (this.info && len > this.info.max_payload) {
-      throw NatsError.errorForCode((ErrorCode.MaxPayloadExceeded));
+      throw NatsError.errorForCode(ErrorCode.MaxPayloadExceeded);
     }
     this.outBytes += len;
     this.outMsgs++;
@@ -580,11 +597,20 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
 
   subscribe(s: SubscriptionImpl): Subscription {
     this.subscriptions.add(s);
+    this._subunsub(s);
+    return s;
+  }
+
+  _sub(s: SubscriptionImpl): void {
     if (s.queue) {
       this.sendCommand(`SUB ${s.subject} ${s.queue} ${s.sid}\r\n`);
     } else {
       this.sendCommand(`SUB ${s.subject} ${s.sid}\r\n`);
     }
+  }
+
+  _subunsub(s: SubscriptionImpl) {
+    this._sub(s);
     if (s.max) {
       this.unsubscribe(s, s.max);
     }
@@ -610,6 +636,17 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     s.max = max;
   }
 
+  resub(s: SubscriptionImpl, subject: string) {
+    if (!s || this.isClosed()) {
+      return;
+    }
+    s.subject = subject;
+    this.subscriptions.resub(s);
+    // we don't auto-unsub here because we don't
+    // really know "processed"
+    this._sub(s);
+  }
+
   flush(p?: Deferred<void>): Promise<void> {
     if (!p) {
       p = deferred<void>();
@@ -630,7 +667,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
       }
     });
     if (cmds.length) {
-      this.transport.send(fastEncoder(cmds.join("")));
+      this.transport.send(encode(cmds.join("")));
     }
   }
 
@@ -693,7 +730,7 @@ export class ProtocolHandler implements Dispatcher<ParserEvent> {
     const mux = this.subscriptions.getMux();
     if (!mux) {
       const inbox = this.muxSubscriptions.init(
-        createInbox(this.options.inboxPrefix),
+        this.options.inboxPrefix,
       );
       // dot is already part of mux
       const sub = new SubscriptionImpl(this, `${inbox}*`);

@@ -15,119 +15,123 @@
 import {
   assert,
   assertEquals,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
-import { connect, createInbox, Msg } from "../src/mod.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
+import { createInbox, Msg, StringCodec } from "../src/mod.ts";
 import {
   deferred,
   SubscriptionImpl,
 } from "../nats-base-client/internal_mod.ts";
-
-const u = "demo.nats.io:4222";
+import { cleanup, setup } from "./jstest_util.ts";
 
 Deno.test("extensions - cleanup fn called at auto unsub", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {}, max: 1 });
   const d = deferred<string>();
   const subimpl = sub as SubscriptionImpl;
   subimpl.info = { data: "hello" };
-  subimpl.cleanupFn = ((sub, info) => {
+  subimpl.cleanupFn = (_sub, info) => {
     const id = info as { data?: string };
     d.resolve(id.data ? id.data : "");
-  });
+  };
   nc.publish(subj);
   assertEquals(await d, "hello");
   assert(sub.isClosed());
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - cleanup fn called at unsubscribe", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {} });
   const d = deferred<string>();
   const subimpl = sub as SubscriptionImpl;
   subimpl.info = { data: "hello" };
-  subimpl.cleanupFn = (() => {
+  subimpl.cleanupFn = () => {
     d.resolve("hello");
-  });
+  };
   sub.unsubscribe();
   assertEquals(await d, "hello");
   assert(sub.isClosed());
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - cleanup fn called at sub drain", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {} });
   const d = deferred<string>();
   const subimpl = sub as SubscriptionImpl;
   subimpl.info = { data: "hello" };
-  subimpl.cleanupFn = (() => {
+  subimpl.cleanupFn = () => {
     d.resolve("hello");
-  });
+  };
   await sub.drain();
   assertEquals(await d, "hello");
   assert(sub.isClosed());
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - cleanup fn called at conn drain", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {} });
   const d = deferred<string>();
   const subimpl = sub as SubscriptionImpl;
   subimpl.info = { data: "hello" };
-  subimpl.cleanupFn = (() => {
+  subimpl.cleanupFn = () => {
     d.resolve("hello");
-  });
+  };
   await nc.drain();
   assertEquals(await d, "hello");
   assert(sub.isClosed());
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - closed resolves on unsub", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {} });
   const closed = (sub as SubscriptionImpl).closed;
   sub.unsubscribe();
   await closed;
   assert(sub.isClosed());
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - dispatched called on callback", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { callback: () => {} }) as SubscriptionImpl;
   let count = 0;
-  sub.setDispatchedFn((msg: Msg | null) => {
-    if (msg) {
-      count++;
-    }
+
+  sub.setPrePostHandlers({
+    dispatchedFn: (msg: Msg | null) => {
+      if (msg) {
+        count++;
+      }
+    },
   });
   nc.publish(subj);
   await nc.flush();
   assertEquals(count, 1);
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("extensions - dispatched called on iterator", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { max: 1 }) as SubscriptionImpl;
   let count = 0;
-  sub.setDispatchedFn((msg: Msg | null) => {
-    if (msg) {
-      count++;
-    }
+  sub.setPrePostHandlers({
+    dispatchedFn: (msg: Msg | null) => {
+      if (msg) {
+        count++;
+      }
+    },
   });
   const done = (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       // nothing
     }
   })();
@@ -135,5 +139,83 @@ Deno.test("extensions - dispatched called on iterator", async () => {
   nc.publish(subj);
   await done;
   assertEquals(count, 1);
-  await nc.close();
+  await cleanup(ns, nc);
+});
+
+Deno.test("extensions - filter called on callback", async () => {
+  const { ns, nc } = await setup();
+  const subj = createInbox();
+  const sub = nc.subscribe(subj, {
+    max: 3,
+    callback: (_err, m) => {
+      processed.push(sc.decode(m.data));
+    },
+  }) as SubscriptionImpl;
+  const sc = StringCodec();
+  const all: string[] = [];
+  const processed: string[] = [];
+  const dispatched: string[] = [];
+  sub.setPrePostHandlers({
+    protocolFilterFn: (msg: Msg | null): boolean => {
+      if (msg) {
+        const d = sc.decode(msg.data);
+        all.push(d);
+        return d.startsWith("A");
+      }
+      return false;
+    },
+    dispatchedFn: (msg: Msg | null): void => {
+      dispatched.push(msg ? sc.decode(msg.data) : "");
+    },
+  });
+
+  nc.publish(subj, sc.encode("A"));
+  nc.publish(subj, sc.encode("B"));
+  nc.publish(subj, sc.encode("C"));
+  await sub.closed;
+
+  assertEquals(processed, ["A"]);
+  assertEquals(dispatched, ["A"]);
+  assertEquals(all, ["A", "B", "C"]);
+
+  await cleanup(ns, nc);
+});
+
+Deno.test("extensions - filter called on iterator", async () => {
+  const { ns, nc } = await setup();
+  const subj = createInbox();
+  const sub = nc.subscribe(subj, { max: 3 }) as SubscriptionImpl;
+  const sc = StringCodec();
+  const all: string[] = [];
+  const processed: string[] = [];
+  const dispatched: string[] = [];
+  sub.setPrePostHandlers({
+    protocolFilterFn: (msg: Msg | null): boolean => {
+      if (msg) {
+        const d = sc.decode(msg.data);
+        all.push(d);
+        return d.startsWith("A");
+      }
+      return false;
+    },
+    dispatchedFn: (msg: Msg | null): void => {
+      dispatched.push(msg ? sc.decode(msg.data) : "");
+    },
+  });
+  const done = (async () => {
+    for await (const m of sub) {
+      processed.push(sc.decode(m.data));
+    }
+  })();
+
+  nc.publish(subj, sc.encode("A"));
+  nc.publish(subj, sc.encode("B"));
+  nc.publish(subj, sc.encode("C"));
+  await done;
+
+  assertEquals(processed, ["A"]);
+  assertEquals(dispatched, ["A"]);
+  assertEquals(all, ["A", "B", "C"]);
+
+  await cleanup(ns, nc);
 });

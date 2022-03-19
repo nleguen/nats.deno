@@ -13,14 +13,15 @@
  * limitations under the License.
  */
 
-import { BufWriter } from "https://deno.land/std@0.90.0/io/mod.ts";
-import { Deferred, deferred } from "https://deno.land/std@0.90.0/async/mod.ts";
+import { BufWriter } from "https://deno.land/std@0.125.0/io/mod.ts";
+import { Deferred, deferred } from "https://deno.land/std@0.125.0/async/mod.ts";
 import Conn = Deno.Conn;
 import {
   checkOptions,
   checkUnsupportedOption,
   ConnectionOptions,
   DataBuffer,
+  Empty,
   ErrorCode,
   extractProtocolMessage,
   INFO,
@@ -32,7 +33,7 @@ import {
 } from "../nats-base-client/internal_mod.ts";
 import type { TlsOptions } from "../nats-base-client/types.ts";
 
-const VERSION = "1.0.0";
+const VERSION = "1.6.1";
 const LANG = "nats.deno";
 
 // if trying to simply write to the connection for some reason
@@ -54,7 +55,8 @@ export class DenoTransport implements Transport {
   private encrypted = false;
   private done = false;
   private closedNotification: Deferred<void | Error> = deferred();
-  private conn!: Conn;
+  // @ts-ignore: Deno 1.9.0 broke compatibility by adding generics to this
+  private conn!: Conn<NetAddr>;
   private writer!: BufWriter;
 
   // the async writes to the socket do not guarantee
@@ -112,7 +114,7 @@ export class DenoTransport implements Transport {
         inbound.fill(frame);
         const raw = inbound.peek();
         pm = extractProtocolMessage(raw);
-        if (pm) {
+        if (pm !== "") {
           break;
         }
       }
@@ -140,10 +142,20 @@ export class DenoTransport implements Transport {
     checkUnsupportedOption("tls.key", tls.key);
     checkUnsupportedOption("tls.keyFile", tls.keyFile);
 
+    const sto = { hostname } as Deno.StartTlsOptions;
+    if (tls.caFile) {
+      const ca = await Deno.readTextFile(tls.caFile);
+      sto.caCerts = [ca];
+    }
+
     this.conn = await Deno.startTls(
       this.conn,
-      { hostname, certFile: tls.caFile },
+      sto,
     );
+    // this is necessary because the startTls process doesn't
+    // reject a bad certificate, however the next write will.
+    // to identify this as the error, we force it
+    await this.conn.write(Empty);
     this.encrypted = true;
     this.writer = new BufWriter(this.conn);
   }
@@ -245,7 +257,7 @@ export class DenoTransport implements Transport {
     this.done = true;
     try {
       this.conn.close();
-    } catch (err) {
+    } catch (_err) {
       // ignored
     }
 
@@ -257,4 +269,21 @@ export class DenoTransport implements Transport {
   closed(): Promise<void | Error> {
     return this.closedNotification;
   }
+}
+
+export async function denoResolveHost(s: string): Promise<string[]> {
+  const a = Deno.resolveDns(s, "A");
+  const aaaa = Deno.resolveDns(s, "AAAA");
+  const ips: string[] = [];
+  const w = await Promise.allSettled([a, aaaa]);
+  if (w[0].status === "fulfilled") {
+    ips.push(...w[0].value);
+  }
+  if (w[1].status === "fulfilled") {
+    ips.push(...w[1].value);
+  }
+  if (ips.length === 0) {
+    ips.push(s);
+  }
+  return ips;
 }

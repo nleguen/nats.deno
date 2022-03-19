@@ -13,13 +13,13 @@
  * limitations under the License.
  *
  */
-import { Servers } from "../nats-base-client/servers.ts";
-import { assertEquals } from "https://deno.land/std@0.90.0/testing/asserts.ts";
-import type { ServerInfo } from "../nats-base-client/internal_mod.ts";
+import { isIPV4OrHostname, Servers } from "../nats-base-client/servers.ts";
+import { assertEquals } from "https://deno.land/std@0.125.0/testing/asserts.ts";
+import type { ServerInfo } from "../nats-base-client/types.ts";
 import { setTransportFactory } from "../nats-base-client/internal_mod.ts";
 
 Deno.test("servers - single", () => {
-  const servers = new Servers(false, ["127.0.0.1:4222"]);
+  const servers = new Servers(["127.0.0.1:4222"], { randomize: false });
   assertEquals(servers.length(), 1);
   assertEquals(servers.getServers().length, 1);
   assertEquals(servers.getCurrentServer().listen, "127.0.0.1:4222");
@@ -33,10 +33,7 @@ Deno.test("servers - single", () => {
 });
 
 Deno.test("servers - multiples", () => {
-  const servers = new Servers(
-    false,
-    ["h:1", "h:2"],
-  );
+  const servers = new Servers(["h:1", "h:2"], { randomize: false });
   assertEquals(servers.length(), 2);
   assertEquals(servers.getServers().length, 2);
   assertEquals(servers.getCurrentServer().listen, "h:1");
@@ -59,7 +56,7 @@ function servInfo(): ServerInfo {
 }
 
 Deno.test("servers - add/delete", () => {
-  const servers = new Servers(false, ["127.0.0.1:4222"]);
+  const servers = new Servers(["127.0.0.1:4222"], { randomize: false });
   assertEquals(servers.length(), 1);
   let ce = servers.update(Object.assign(servInfo(), { connect_urls: ["h:1"] }));
   assertEquals(ce.added.length, 1);
@@ -86,10 +83,7 @@ Deno.test("servers - url parse fn", () => {
     return `x://${s}`;
   };
   setTransportFactory({ urlParseFn: fn });
-  const s = new Servers(
-    false,
-    ["127.0.0.1:4222"],
-  );
+  const s = new Servers(["127.0.0.1:4222"], { randomize: false });
   s.update(Object.assign(servInfo(), { connect_urls: ["h:1", "j:2/path"] }));
 
   const servers = s.getServers();
@@ -100,10 +94,7 @@ Deno.test("servers - url parse fn", () => {
 });
 
 Deno.test("servers - save tls name", () => {
-  const servers = new Servers(
-    false,
-    ["h:1", "h:2"],
-  );
+  const servers = new Servers(["h:1", "h:2"], { randomize: false });
   servers.addServer("127.1.0.0", true);
   servers.addServer("127.1.2.0", true);
   servers.updateTLSName();
@@ -118,4 +109,25 @@ Deno.test("servers - save tls name", () => {
   gossiped.forEach((sn) => {
     assertEquals(sn.tlsName, "h");
   });
+});
+
+Deno.test("servers - port 80", () => {
+  function t(hp: string, port: number) {
+    let servers = new Servers([hp]);
+    const s = servers.getCurrentServer();
+    assertEquals(s.port, port);
+  }
+  t("localhost:80", 80);
+  t("localhost:443", 443);
+  t("localhost:201", 201);
+  t("localhost", 4222);
+  t("localhost/foo", 4222);
+  t("localhost:2342/foo", 2342);
+  t("[2001:db8:4006:812::200e]:8080", 8080);
+  t("::1", 4222);
+});
+
+Deno.test("servers - hostname only", () => {
+  assertEquals(isIPV4OrHostname("hostname"), true);
+  assertEquals(isIPV4OrHostname("hostname:40"), true);
 });

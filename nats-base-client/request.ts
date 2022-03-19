@@ -15,7 +15,7 @@
 import { Deferred, deferred, extend, Timeout, timeout } from "./util.ts";
 import type { Msg, RequestOptions } from "./types.ts";
 import { ErrorCode, NatsError } from "./error.ts";
-import type { MuxSubscription } from "./muxsubscription.ts";
+import { MuxSubscription } from "./muxsubscription.ts";
 import { nuid } from "./nuid.ts";
 
 export class Request {
@@ -23,6 +23,7 @@ export class Request {
   received: number;
   deferred: Deferred<Msg>;
   timer: Timeout<Msg>;
+  ctx: Error;
   private mux: MuxSubscription;
 
   constructor(
@@ -35,6 +36,7 @@ export class Request {
     this.token = nuid.next();
     extend(this, opts);
     this.timer = timeout<Msg>(opts.timeout);
+    this.ctx = new Error();
   }
 
   resolver(err: Error | null, msg: Msg): void {
@@ -42,6 +44,7 @@ export class Request {
       this.timer.cancel();
     }
     if (err) {
+      err.stack += `\n\n${this.ctx.stack}`;
       this.deferred.reject(err);
     } else {
       this.deferred.resolve(msg);

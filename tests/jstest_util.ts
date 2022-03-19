@@ -1,23 +1,26 @@
-import * as path from "https://deno.land/std@0.90.0/path/mod.ts";
+import * as path from "https://deno.land/std@0.125.0/path/mod.ts";
 import { NatsServer } from "../tests/helpers/mod.ts";
 import { connect } from "../src/mod.ts";
-import { assert } from "https://deno.land/std@0.90.0/testing/asserts.ts";
+import { assert } from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import {
   ConnectionOptions,
   extend,
   NatsConnection,
   nuid,
 } from "../nats-base-client/internal_mod.ts";
+import { StreamConfig } from "../nats-base-client/types.ts";
 
-export const jsopts = {
-  // debug: true,
-  // trace: true,
-  jetstream: {
-    max_file_store: 1024 * 1024,
-    max_memory_store: 1024 * 1024,
-    store_dir: "/tmp",
-  },
-};
+export function jsopts() {
+  return {
+    // debug: true,
+    // trace: true,
+    jetstream: {
+      max_file_store: 1024 * 1024,
+      max_memory_store: 1024 * 1024,
+      store_dir: "/tmp",
+    },
+  };
+}
 
 export function jetstreamExportServerConf(
   opts: unknown = {},
@@ -52,12 +55,12 @@ export function jetstreamServerConf(
   opts: unknown = {},
   randomStoreDir = true,
 ): Record<string, unknown> {
-  const conf = Object.assign(opts, jsopts);
+  const conf = Object.assign(jsopts(), opts);
   if (randomStoreDir) {
     conf.jetstream.store_dir = path.join("/tmp", "jetstream", nuid.next());
   }
   Deno.mkdirSync(conf.jetstream.store_dir, { recursive: true });
-  return opts as Record<string, unknown>;
+  return conf as Record<string, unknown>;
 }
 export async function setup(
   serverConf?: Record<string, unknown>,
@@ -87,12 +90,12 @@ export async function cleanup(
 export async function initStream(
   nc: NatsConnection,
   stream: string = nuid.next(),
+  opts: Partial<StreamConfig> = {},
 ): Promise<{ stream: string; subj: string }> {
   const jsm = await nc.jetstreamManager();
   const subj = `${stream}.A`;
-  await jsm.streams.add(
-    { name: stream, subjects: [subj] },
-  );
+  const sc = Object.assign(opts, { name: stream, subjects: [subj] });
+  await jsm.streams.add(sc);
   return { stream, subj };
 }
 

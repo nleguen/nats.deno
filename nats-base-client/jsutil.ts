@@ -73,6 +73,10 @@ export function isFlowControlMsg(msg: Msg): boolean {
   return h.code >= 100 && h.code < 200;
 }
 
+export function isHeartbeatMsg(msg: Msg): boolean {
+  return isFlowControlMsg(msg) && msg.headers?.description === "Idle Heartbeat";
+}
+
 export function checkJsError(msg: Msg): NatsError | null {
   const h = msg.headers;
   if (!h) {
@@ -90,6 +94,11 @@ export function checkJsErrorCode(
   }
   description = description.toLowerCase();
   switch (code) {
+    case 408:
+      return NatsError.errorForCode(
+        ErrorCode.JetStream408RequestTimeout,
+        new Error(description),
+      );
     case 503:
       return NatsError.errorForCode(
         ErrorCode.JetStreamNotEnabled,

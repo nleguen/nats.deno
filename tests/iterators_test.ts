@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2021 The NATS Authors
+ * Copyright 2020-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -12,20 +12,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { connect, createInbox, ErrorCode, NatsError } from "../src/mod.ts";
-import { assertEquals } from "https://deno.land/std@0.90.0/testing/asserts.ts";
+import { connect, createInbox, ErrorCode } from "../src/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import { assertErrorCode, Lock, NatsServer } from "./helpers/mod.ts";
 import { assert } from "../nats-base-client/denobuffer.ts";
 import { QueuedIteratorImpl } from "../nats-base-client/queued_iterator.ts";
-
-const u = "demo.nats.io:4222";
+import { NatsConnectionImpl } from "../nats-base-client/nats.ts";
+import { cleanup, setup } from "./jstest_util.ts";
 
 Deno.test("iterators - unsubscribe breaks and closes", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj);
   const done = (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       if (sub.getReceived() > 1) {
         sub.unsubscribe();
       }
@@ -35,16 +35,16 @@ Deno.test("iterators - unsubscribe breaks and closes", async () => {
   nc.publish(subj);
   await done;
   assertEquals(sub.getReceived(), 2);
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("iterators - autounsub breaks and closes", async () => {
-  const nc = await connect({ servers: u });
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj, { max: 2 });
   const lock = Lock(2);
   const done = (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       lock.unlock();
     }
   })();
@@ -53,20 +53,19 @@ Deno.test("iterators - autounsub breaks and closes", async () => {
   await done;
   await lock;
   assertEquals(sub.getReceived(), 2);
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("iterators - permission error breaks and closes", async () => {
   const conf = {
     authorization: {
-      PERM: {
-        subscribe: "bar",
-        publish: "foo",
-      },
       users: [{
         user: "derek",
         password: "foobar",
-        permission: "$PERM",
+        permission: {
+          subscribe: "bar",
+          publish: "foo",
+        },
       }],
     },
   };
@@ -78,7 +77,7 @@ Deno.test("iterators - permission error breaks and closes", async () => {
 
   const lock = Lock();
   await (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       // ignored
     }
   })().catch(() => {
@@ -86,22 +85,16 @@ Deno.test("iterators - permission error breaks and closes", async () => {
   });
 
   await lock;
-  await nc.closed().then((err) => {
-    assertErrorCode(err as NatsError, ErrorCode.PermissionsViolation);
-  });
-  await nc.close();
-  await ns.stop();
+  await cleanup(ns, nc);
 });
 
 Deno.test("iterators - unsubscribing closes", async () => {
-  const nc = await connect(
-    { servers: u },
-  );
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj);
   const lock = Lock();
   const done = (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       lock.unlock();
     }
   })();
@@ -109,18 +102,16 @@ Deno.test("iterators - unsubscribing closes", async () => {
   await lock;
   sub.unsubscribe();
   await done;
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("iterators - connection close closes", async () => {
-  const nc = await connect(
-    { servers: u },
-  );
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const sub = nc.subscribe(subj);
   const lock = Lock();
   const done = (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       lock.unlock();
     }
   })();
@@ -129,12 +120,11 @@ Deno.test("iterators - connection close closes", async () => {
   await nc.close();
   await lock;
   await done;
+  await ns.stop();
 });
 
 Deno.test("iterators - cb subs fail iterator", async () => {
-  const nc = await connect(
-    { servers: u },
-  );
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const lock = Lock(2);
   const sub = nc.subscribe(subj, {
@@ -146,7 +136,7 @@ Deno.test("iterators - cb subs fail iterator", async () => {
   });
 
   (async () => {
-    for await (const m of sub) {
+    for await (const _m of sub) {
       lock.unlock();
     }
   })().catch((err) => {
@@ -155,14 +145,12 @@ Deno.test("iterators - cb subs fail iterator", async () => {
   });
   nc.publish(subj);
   await nc.flush();
-  await nc.close();
+  await cleanup(ns, nc);
   await lock;
 });
 
 Deno.test("iterators - cb message counts", async () => {
-  const nc = await connect(
-    { servers: u },
-  );
+  const { ns, nc } = await setup();
   const subj = createInbox();
   const lock = Lock(3);
   const sub = nc.subscribe(subj, {
@@ -180,7 +168,7 @@ Deno.test("iterators - cb message counts", async () => {
   assertEquals(sub.getReceived(), 3);
   assertEquals(sub.getProcessed(), 3);
   assertEquals(sub.getPending(), 0);
-  await nc.close();
+  await cleanup(ns, nc);
 });
 
 Deno.test("iterators - push on done is noop", async () => {
@@ -203,4 +191,23 @@ Deno.test("iterators - push on done is noop", async () => {
   qi.push("d");
   assertEquals(buf.length, 3);
   assertEquals("a,b,c", buf.join(","));
+});
+
+Deno.test("iterators - break cleans up", async () => {
+  const { ns, nc } = await setup();
+  const nci = nc as NatsConnectionImpl;
+  const subj = createInbox();
+  const sub = nc.subscribe(subj);
+  const done = (async () => {
+    for await (const _m of sub) {
+      break;
+    }
+  })();
+  nc.publish(subj);
+  await done;
+
+  assertEquals(sub.isClosed(), true);
+  assertEquals(nci.protocol.subscriptions.subs.size, 0);
+
+  await cleanup(ns, nc);
 });

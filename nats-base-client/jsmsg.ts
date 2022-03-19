@@ -21,10 +21,11 @@ import {
 } from "./types.ts";
 import { MsgHdrs } from "./headers.ts";
 import { DataBuffer } from "./databuffer.ts";
-import { JSONCodec } from "./codec.ts";
+import { JSONCodec, StringCodec } from "./codec.ts";
 import { MsgImpl } from "./msg.ts";
 import { ProtocolHandler } from "./protocol.ts";
 import { Request } from "./request.ts";
+import { nanos } from "./jsutil.ts";
 
 export const ACK = Uint8Array.of(43, 65, 67, 75);
 const NAK = Uint8Array.of(45, 78, 65, 75);
@@ -39,22 +40,36 @@ export function toJsMsg(m: Msg): JsMsg {
 
 export function parseInfo(s: string): DeliveryInfo {
   const tokens = s.split(".");
-  if (tokens.length !== 9 && tokens[0] !== "$JS" && tokens[1] !== "ACK") {
+  if (tokens.length === 9) {
+    tokens.splice(2, 0, "_", "");
+  }
+
+  if (
+    (tokens.length < 11) || tokens[0] !== "$JS" || tokens[1] !== "ACK"
+  ) {
     throw new Error(`not js message`);
   }
+
+  // old
   // "$JS.ACK.<stream>.<consumer>.<redeliveryCount><streamSeq><deliverySequence>.<timestamp>.<pending>"
+  // new
+  // $JS.ACK.<domain>.<accounthash>.<stream>.<consumer>.<redeliveryCount>.<streamSeq>.<deliverySequence>.<timestamp>.<pending>.<random>
   const di = {} as DeliveryInfo;
-  di.stream = tokens[2];
-  di.consumer = tokens[3];
-  di.redeliveryCount = parseInt(tokens[4], 10);
-  di.streamSequence = parseInt(tokens[5], 10);
-  di.deliverySequence = parseInt(tokens[6], 10);
-  di.timestampNanos = parseInt(tokens[7], 10);
-  di.pending = parseInt(tokens[8], 10);
+  // if domain is "_", replace with blank
+  di.domain = tokens[2] === "_" ? "" : tokens[2];
+  di.account_hash = tokens[3];
+  di.stream = tokens[4];
+  di.consumer = tokens[5];
+  di.redeliveryCount = parseInt(tokens[6], 10);
+  di.redelivered = di.redeliveryCount > 1;
+  di.streamSequence = parseInt(tokens[7], 10);
+  di.deliverySequence = parseInt(tokens[8], 10);
+  di.timestampNanos = parseInt(tokens[9], 10);
+  di.pending = parseInt(tokens[10], 10);
   return di;
 }
 
-class JsMsgImpl implements JsMsg {
+export class JsMsgImpl implements JsMsg {
   msg: Msg;
   di?: DeliveryInfo;
   didAck: boolean;
@@ -92,7 +107,7 @@ class JsMsgImpl implements JsMsg {
   }
 
   get reply(): string {
-    return this.msg.reply ?? "";
+    return this.msg.reply || "";
   }
 
   get seq(): number {
@@ -101,9 +116,15 @@ class JsMsgImpl implements JsMsg {
 
   doAck(payload: Uint8Array) {
     if (!this.didAck) {
-      this.didAck = true;
+      // all acks are final with the exception of +WPI
+      this.didAck = !this.isWIP(payload);
       this.msg.respond(payload);
     }
+  }
+
+  isWIP(p: Uint8Array) {
+    return p.length === 4 && p[0] === WPI[0] && p[1] === WPI[1] &&
+      p[2] === WPI[2] && p[3] === WPI[3];
   }
 
   // this has to dig into the internals as the message has access
@@ -142,8 +163,14 @@ class JsMsgImpl implements JsMsg {
     this.doAck(ACK);
   }
 
-  nak() {
-    this.doAck(NAK);
+  nak(millis?: number) {
+    let payload = NAK;
+    if (millis) {
+      payload = StringCodec().encode(
+        `-NAK ${JSON.stringify({ delay: nanos(millis) })}`,
+      );
+    }
+    this.doAck(payload);
   }
 
   working() {

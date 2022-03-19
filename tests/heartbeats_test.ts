@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2021 The NATS Authors
+ * Copyright 2020-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,7 +16,7 @@ import {
   assert,
   assertEquals,
   fail,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 
 import {
   DebugEvents,
@@ -102,5 +102,7 @@ Deno.test("heartbeat - recovers from missed", async () => {
   await delay(800);
   hb.cancel();
   assertEquals(hb.timer, undefined);
-  assert(status.length >= 7, `${status.length} >= 7`);
+  assert(status.length >= 6, `${status.length} >= 6`);
+  // some resources in the test runner are not always cleaned unless we wait a bit
+  await delay(500);
 });

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2021 The NATS Authors
+ * Copyright 2018-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,33 +15,33 @@
 
 import {
   assertEquals,
+  assertRejects,
   fail,
-} from "https://deno.land/std@0.90.0/testing/asserts.ts";
+} from "https://deno.land/std@0.125.0/testing/asserts.ts";
 import {
   connect,
   credsAuthenticator,
   ErrorCode,
-  Events,
   jwtAuthenticator,
   nkeyAuthenticator,
   Status,
   StringCodec,
 } from "../src/mod.ts";
-import { assertErrorCode, Lock, NatsServer } from "./helpers/mod.ts";
+import { assertErrorCode, NatsServer } from "./helpers/mod.ts";
 import { deferred, nkeys } from "../nats-base-client/internal_mod.ts";
 import { NKeyAuth } from "../nats-base-client/authenticator.ts";
 import { assert } from "../nats-base-client/denobuffer.ts";
+import { cleanup, setup } from "./jstest_util.ts";
 
 const conf = {
   authorization: {
-    PERM: {
-      subscribe: "bar",
-      publish: "foo",
-    },
     users: [{
       user: "derek",
       password: "foobar",
-      permission: "$PERM",
+      permission: {
+        subscribe: "bar",
+        publish: "foo",
+      },
     }],
   },
 };
@@ -74,6 +74,23 @@ Deno.test("auth - bad", async () => {
   await ns.stop();
 });
 
+Deno.test("auth - weird chars", async () => {
+  const pass = "§12§12§12";
+  const ns = await NatsServer.start({
+    authorization: {
+      username: "admin",
+      password: pass,
+    },
+  });
+
+  const nc = await connect(
+    { port: ns.port, user: "admin", pass: pass },
+  );
+  await nc.flush;
+  await nc.close();
+  await ns.stop();
+});
+
 Deno.test("auth - un/pw", async () => {
   const ns = await NatsServer.start(conf);
   const nc = await connect(
@@ -84,77 +101,142 @@ Deno.test("auth - un/pw", async () => {
   await ns.stop();
 });
 
-Deno.test("auth - sub permissions", async () => {
-  const ns = await NatsServer.start(conf);
-  const lock = Lock();
-  const nc = await connect(
-    { port: ns.port, user: "derek", pass: "foobar" },
-  );
+Deno.test("auth - sub no permissions keeps connection", async () => {
+  const { ns, nc } = await setup({
+    authorization: {
+      users: [{
+        user: "a",
+        password: "a",
+        permissions: { subscribe: "foo" },
+      }],
+    },
+  }, { user: "a", pass: "a", reconnect: false });
 
-  const status = nc.status();
-
-  let notifications = 0;
-  (async () => {
-    for await (const s of status) {
-      notifications++;
-    }
-  })().then();
-
-  const done = nc.closed();
-
-  const sub = nc.subscribe("foo");
-  (async () => {
-    for await (const m of sub) {
-      // ignoring
-    }
-  })().catch((err) => {
-    lock.unlock();
-    assertErrorCode(err as Error, ErrorCode.PermissionsViolation);
-    notifications++;
-  });
-
-  nc.publish("foo");
-
-  await Promise.all([lock, done]);
-  assertEquals(notifications, 1);
-  await ns.stop();
-});
-
-Deno.test("auth - pub perm", async () => {
-  const ns = await NatsServer.start(conf);
-  const lock = Lock();
-  const nc = await connect(
-    { port: ns.port, user: "derek", pass: "foobar" },
-  );
-
-  const status = nc.status();
   const errStatus = deferred<Status>();
-  (async () => {
-    for await (const s of status) {
+  const _ = (async () => {
+    for await (const s of nc.status()) {
       errStatus.resolve(s);
     }
-  })().then();
+  })();
 
-  nc.closed().then((err) => {
-    assertErrorCode(err as Error, ErrorCode.PermissionsViolation);
-    lock.unlock();
+  const cbErr = deferred<Error | null>();
+  const sub = nc.subscribe("bar", {
+    callback: (err, msg) => {
+      cbErr.resolve(err);
+    },
   });
 
+  const v = await Promise.all([errStatus, cbErr, sub.closed]);
+  assertEquals(v[0].data, ErrorCode.PermissionsViolation);
+  assertEquals(
+    v[1]?.message,
+    "'Permissions Violation for Subscription to \"bar\"'",
+  );
+  assertEquals(nc.isClosed(), false);
+
+  await cleanup(ns, nc);
+});
+
+Deno.test("auth - sub iterator no permissions keeps connection", async () => {
+  const { ns, nc } = await setup({
+    authorization: {
+      users: [{
+        user: "a",
+        password: "a",
+        permissions: { subscribe: "foo" },
+      }],
+    },
+  }, { user: "a", pass: "a", reconnect: false });
+
+  const errStatus = deferred<Status>();
+  const _ = (async () => {
+    for await (const s of nc.status()) {
+      errStatus.resolve(s);
+    }
+  })();
+
+  const iterErr = deferred<Error | null>();
   const sub = nc.subscribe("bar");
-  const iter = (async () => {
+  (async () => {
     for await (const m of sub) {
-      fail("should not have been called");
+    }
+  })().catch((err) => {
+    iterErr.resolve(err);
+  });
+
+  await nc.flush();
+
+  const v = await Promise.all([errStatus, iterErr, sub.closed]);
+  assertEquals(v[0].data, ErrorCode.PermissionsViolation);
+  assertEquals(
+    v[1]?.message,
+    "'Permissions Violation for Subscription to \"bar\"'",
+  );
+  assertEquals(sub.isClosed(), true);
+  assertEquals(nc.isClosed(), false);
+
+  await cleanup(ns, nc);
+});
+
+Deno.test("auth - pub permissions keep connection", async () => {
+  const { ns, nc } = await setup({
+    authorization: {
+      users: [{
+        user: "a",
+        password: "a",
+        permissions: { publish: "foo" },
+      }],
+    },
+  }, { user: "a", pass: "a", reconnect: false });
+
+  const errStatus = deferred<Status>();
+  const _ = (async () => {
+    for await (const s of nc.status()) {
+      errStatus.resolve(s);
     }
   })();
 
   nc.publish("bar");
 
-  await lock;
-  await iter;
-  const es = await errStatus;
-  assertEquals(es.type, Events.Error);
-  assertEquals(es.data, ErrorCode.PermissionsViolation);
-  await ns.stop();
+  const v = await errStatus;
+  assertEquals(v.data, ErrorCode.PermissionsViolation);
+  assertEquals(nc.isClosed(), false);
+
+  await cleanup(ns, nc);
+});
+
+Deno.test("auth - req permissions keep connection", async () => {
+  const { ns, nc } = await setup({
+    authorization: {
+      users: [{
+        user: "a",
+        password: "a",
+        permissions: { publish: "foo" },
+      }],
+    },
+  }, { user: "a", pass: "a", reconnect: false });
+
+  const errStatus = deferred<Status>();
+  const _ = (async () => {
+    for await (const s of nc.status()) {
+      console.log(s);
+      errStatus.resolve(s);
+    }
+  })();
+
+  await assertRejects(
+    async () => {
+      await nc.request("bar");
+    },
+    Error,
+    ErrorCode.Timeout,
+  );
+
+  const v = await errStatus;
+  assertEquals(v.data, ErrorCode.PermissionsViolation);
+  assertEquals(nc.isClosed(), false);
+
+  await cleanup(ns, nc);
 });
 
 Deno.test("auth - user and token is rejected", () => {
@@ -408,7 +490,7 @@ Deno.test("auth - creds authenticator validation", () => {
       const { nkey, sig } = auth("helloworld") as unknown as NKeyAuth;
       assertEquals(nkey, upk);
       assert(sig.length > 0);
-    } catch (err) {
+    } catch (_err) {
       if (v[2]) {
         fail(`should have passed: ${v[3]}`);
       }

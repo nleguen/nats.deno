@@ -17,6 +17,7 @@ import {
   ConsumerConfig,
   ConsumerInfo,
   ConsumerListResponse,
+  ConsumerUpdateConfig,
   CreateConsumerRequest,
   JetStreamOptions,
   Lister,
@@ -38,6 +39,17 @@ export class ConsumerAPIImpl extends BaseApiClient implements ConsumerAPI {
   ): Promise<ConsumerInfo> {
     validateStreamName(stream);
 
+    if (cfg.deliver_group && cfg.flow_control) {
+      throw new Error(
+        "jetstream flow control is not supported with queue groups",
+      );
+    }
+    if (cfg.deliver_group && cfg.idle_heartbeat) {
+      throw new Error(
+        "jetstream idle heartbeat is not supported with queue groups",
+      );
+    }
+
     const cr = {} as CreateConsumerRequest;
     cr.config = cfg;
     cr.stream_name = stream;
@@ -51,6 +63,16 @@ export class ConsumerAPIImpl extends BaseApiClient implements ConsumerAPI {
       : `${this.prefix}.CONSUMER.CREATE.${stream}`;
     const r = await this._request(subj, cr);
     return r as ConsumerInfo;
+  }
+
+  async update(
+    stream: string,
+    durable: string,
+    cfg: ConsumerUpdateConfig,
+  ): Promise<ConsumerInfo> {
+    const ci = await this.info(stream, durable);
+    const changable = cfg as ConsumerConfig;
+    return this.add(stream, Object.assign(ci.config, changable));
   }
 
   async info(stream: string, name: string): Promise<ConsumerInfo> {

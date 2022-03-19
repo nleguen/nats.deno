@@ -1,6 +1,6 @@
 #!/usr/bin/env deno run --allow-all --unstable
 
-import { parse } from "https://deno.land/std@0.90.0/flags/mod.ts";
+import { parse } from "https://deno.land/std@0.125.0/flags/mod.ts";
 import { connect, Nuid } from "../src/mod.ts";
 import { Bench, Metric } from "../nats-base-client/bench.ts";
 const defaults = {
@@ -81,8 +81,8 @@ const reducer = (a, m) => {
     a.version = m.version;
     a.async = m.async;
 
-    a.max = Math.max((a.max === undefined ? 0 : a.max), m.duration);
-    a.min = Math.min((a.min === undefined ? m.duration : a.max), m.duration);
+    a.max = Math.max(a.max === undefined ? 0 : a.max, m.duration);
+    a.min = Math.min(a.min === undefined ? m.duration : a.max, m.duration);
   }
   return a;
 };

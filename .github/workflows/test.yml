@@ -13,10 +13,10 @@ jobs:
   test:
     name: ${{ matrix.config.kind }} ${{ matrix.config.os }}
     runs-on: ubuntu-latest
-
+    environment: CI
     strategy:
       matrix:
-        deno-version: [1.8.1]
+        deno-version: [1.17.0]
 
     steps:
       - name: Git Checkout Deno Module
@@ -30,7 +30,12 @@ jobs:
           deno-version: ${{ matrix.deno-version }}
 
       - name: Set NATS Server Version
-        run: echo "NATS_VERSION=v2.2.0" >> $GITHUB_ENV
+        run: echo "NATS_VERSION=v2.7.2" >> $GITHUB_ENV
+
+      # this here because dns seems to be wedged on gha
+      - name: Add hosts to /etc/hosts
+        run: |
+          sudo echo "145.40.102.131 demo.nats.io" | sudo tee -a /etc/hosts
 
       - name: Get nats-server
         run: |
@@ -53,6 +58,7 @@ jobs:
         env:
           TMPDIR: ${{ runner.temp }}
           CI: true
+          NGS_CI_USER: ${{ secrets.NGS_CI_USER }}
         run: deno test --allow-all --unstable --failfast --coverage=./cov
 
       - name: Build nats.js

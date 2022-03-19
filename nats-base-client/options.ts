@@ -27,7 +27,7 @@ import {
   ServerInfo,
 } from "./types.ts";
 import { buildAuthenticator } from "./authenticator.ts";
-import { defaultPort } from "./transport.ts";
+import { defaultPort, getResolveFn } from "./transport.ts";
 import { createInbox } from "./mod.ts";
 
 export function defaultOptions(): ConnectionOptions {
@@ -50,11 +50,20 @@ export function defaultOptions(): ConnectionOptions {
 export function parseOptions(opts?: ConnectionOptions): ConnectionOptions {
   const dhp = `${DEFAULT_HOST}:${defaultPort()}`;
   opts = opts || { servers: [dhp] };
-  if (opts.port) {
-    opts.servers = [`${DEFAULT_HOST}:${opts.port}`];
-  }
+  opts.servers = opts.servers || [];
   if (typeof opts.servers === "string") {
     opts.servers = [opts.servers];
+  }
+
+  if (opts.servers.length > 0 && opts.port) {
+    throw new NatsError(
+      "port and servers options are mutually exclusive",
+      ErrorCode.InvalidOption,
+    );
+  }
+
+  if (opts.servers.length === 0 && opts.port) {
+    opts.servers = [`${DEFAULT_HOST}:${opts.port}`];
   }
   if (opts.servers && opts.servers.length === 0) {
     opts.servers = [dhp];
@@ -103,6 +112,15 @@ export function parseOptions(opts?: ConnectionOptions): ConnectionOptions {
       createInbox(options.inboxPrefix);
     } catch (err) {
       throw new NatsError(err.message, ErrorCode.ApiError);
+    }
+  }
+
+  if (options.resolve) {
+    if (typeof getResolveFn() !== "function") {
+      throw new NatsError(
+        `'resolve' is not supported on this client`,
+        ErrorCode.InvalidOption,
+      );
     }
   }
 

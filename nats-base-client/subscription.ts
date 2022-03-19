@@ -12,7 +12,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { DispatchedFn, QueuedIteratorImpl } from "./queued_iterator.ts";
+import {
+  DispatchedFn,
+  IngestionFilterFn,
+  IngestionFilterFnResult,
+  ProtocolFilterFn,
+  QueuedIteratorImpl,
+} from "./queued_iterator.ts";
 import type { Base, Msg, Subscription, SubscriptionOptions } from "./types.ts";
 import { Deferred, deferred, extend, Timeout, timeout } from "./util.ts";
 import { ErrorCode, NatsError } from "./error.ts";
@@ -55,20 +61,53 @@ export class SubscriptionImpl extends QueuedIteratorImpl<Msg>
         .catch((err) => {
           // timer fired
           this.stop(err);
+          if (this.noIterator) {
+            this.callback(err, {} as Msg);
+          }
         });
+    }
+    if (!this.noIterator) {
+      // cleanup - they used break or return from the iterator
+      // make sure we clean up, if they didn't call unsub
+      this.iterClosed.then(() => {
+        this.closed.resolve();
+        this.unsubscribe();
+      });
     }
   }
 
-  setDispatchedFn(cb: DispatchedFn<Msg>) {
-    // user specified callback
+  setPrePostHandlers(
+    opts: {
+      ingestionFilterFn?: IngestionFilterFn<Msg>;
+      protocolFilterFn?: ProtocolFilterFn<Msg>;
+      dispatchedFn?: DispatchedFn<Msg>;
+    },
+  ) {
     if (this.noIterator) {
       const uc = this.callback;
+
+      const ingestion = opts.ingestionFilterFn
+        ? opts.ingestionFilterFn
+        : (): IngestionFilterFnResult => {
+          return { ingest: true, protocol: false };
+        };
+      const filter = opts.protocolFilterFn ? opts.protocolFilterFn : () => {
+        return true;
+      };
+      const dispatched = opts.dispatchedFn ? opts.dispatchedFn : () => {};
       this.callback = (err: NatsError | null, msg: Msg) => {
-        uc(err, msg);
-        cb(msg);
+        const { ingest } = ingestion(msg);
+        if (!ingest) {
+          return;
+        }
+        if (filter(msg)) {
+          uc(err, msg);
+          dispatched(msg);
+        }
       };
     } else {
-      this.dispatchedFn = cb;
+      this.protocolFilterFn = opts.protocolFilterFn;
+      this.dispatchedFn = opts.dispatchedFn;
     }
   }
 
@@ -84,7 +123,7 @@ export class SubscriptionImpl extends QueuedIteratorImpl<Msg>
       if (this.cleanupFn) {
         try {
           this.cleanupFn(this, this.info);
-        } catch (err) {
+        } catch (_err) {
           // ignoring
         }
       }

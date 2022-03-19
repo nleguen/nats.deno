@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2021 The NATS Authors
+ * Copyright 2018-2022 The NATS Authors
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -33,6 +33,10 @@ import {
   Subscription,
   SubscriptionOptions,
 } from "./types.ts";
+
+import type { SemVer } from "./semver.ts";
+import { parseSemVer } from "./semver.ts";
+
 import { parseOptions } from "./options.ts";
 import { QueuedIterator, QueuedIteratorImpl } from "./queued_iterator.ts";
 import { Request } from "./request.ts";
@@ -81,15 +85,28 @@ export class NatsConnectionImpl implements NatsConnection {
     await this.protocol.close();
   }
 
+  _check(subject: string, sub: boolean, pub: boolean) {
+    if (this.isClosed()) {
+      throw NatsError.errorForCode(ErrorCode.ConnectionClosed);
+    }
+    if (sub && this.isDraining()) {
+      throw NatsError.errorForCode(ErrorCode.ConnectionDraining);
+    }
+    if (pub && this.protocol.noMorePublishing) {
+      throw NatsError.errorForCode(ErrorCode.ConnectionDraining);
+    }
+    subject = subject || "";
+    if (subject.length === 0) {
+      throw NatsError.errorForCode(ErrorCode.BadSubject);
+    }
+  }
+
   publish(
     subject: string,
     data: Uint8Array = Empty,
     options?: PublishOptions,
   ): void {
-    subject = subject || "";
-    if (subject.length === 0) {
-      throw NatsError.errorForCode(ErrorCode.BadSubject);
-    }
+    this._check(subject, false, true);
     // if argument is not undefined/null and not a Uint8Array, toss
     if (data && !isUint8Array(data)) {
       throw NatsError.errorForCode(ErrorCode.BadPayload);
@@ -101,20 +118,30 @@ export class NatsConnectionImpl implements NatsConnection {
     subject: string,
     opts: SubscriptionOptions = {},
   ): Subscription {
-    if (this.isClosed()) {
-      throw NatsError.errorForCode(ErrorCode.ConnectionClosed);
-    }
-    if (this.isDraining()) {
-      throw NatsError.errorForCode(ErrorCode.ConnectionDraining);
-    }
-    subject = subject || "";
-    if (subject.length === 0) {
-      throw NatsError.errorForCode(ErrorCode.BadSubject);
-    }
-
+    this._check(subject, true, false);
     const sub = new SubscriptionImpl(this.protocol, subject, opts);
     this.protocol.subscribe(sub);
     return sub;
+  }
+
+  _resub(s: Subscription, subject: string, max?: number) {
+    this._check(subject, true, false);
+    const si = s as SubscriptionImpl;
+    // FIXME: need way of understanding a callbacks processed
+    //   count without it, we cannot really do much - ie
+    //   for rejected messages, the count would be lower, etc.
+    //   To handle cases were for example KV is building a map
+    //   the consumer would say how many messages we need to do
+    //   a proper build before we can handle updates.
+    si.max = max; // this might clear it
+    if (max) {
+      // we cannot auto-unsub, because we don't know the
+      // number of messages we processed vs received
+      // allow the auto-unsub on processMsg to work if they
+      // we were called with a new max
+      si.max = max + si.received;
+    }
+    this.protocol.resub(si, subject);
   }
 
   request(
@@ -122,19 +149,10 @@ export class NatsConnectionImpl implements NatsConnection {
     data: Uint8Array = Empty,
     opts: RequestOptions = { timeout: 1000, noMux: false },
   ): Promise<Msg> {
-    if (this.isClosed()) {
-      return Promise.reject(
-        NatsError.errorForCode(ErrorCode.ConnectionClosed),
-      );
-    }
-    if (this.isDraining()) {
-      return Promise.reject(
-        NatsError.errorForCode(ErrorCode.ConnectionDraining),
-      );
-    }
-    subject = subject || "";
-    if (subject.length === 0) {
-      return Promise.reject(NatsError.errorForCode(ErrorCode.BadSubject));
+    try {
+      this._check(subject, true, true);
+    } catch (err) {
+      return Promise.reject(err);
     }
     opts.timeout = opts.timeout || 1000;
     if (opts.timeout < 1) {
@@ -154,6 +172,7 @@ export class NatsConnectionImpl implements NatsConnection {
         ? opts.reply
         : createInbox(this.options.inboxPrefix);
       const d = deferred<Msg>();
+      const errCtx = new Error();
       this.subscribe(
         inbox,
         {
@@ -161,10 +180,16 @@ export class NatsConnectionImpl implements NatsConnection {
           timeout: opts.timeout,
           callback: (err, msg) => {
             if (err) {
+              // timeouts from `timeout()` will have the proper stack
+              if (err.code !== ErrorCode.Timeout) {
+                err.stack += `\n\n${errCtx.stack}`;
+              }
               d.reject(err);
             } else {
               err = isRequestError(msg);
               if (err) {
+                // if we failed here, help the developer by showing what failed
+                err.stack += `\n\n${errCtx.stack}`;
                 d.reject(err);
               } else {
                 d.resolve(msg);
@@ -173,7 +198,7 @@ export class NatsConnectionImpl implements NatsConnection {
           },
         },
       );
-      this.publish(subject, data, { reply: inbox });
+      this.protocol.publish(subject, data, { reply: inbox });
       return d;
     } else {
       const r = new Request(this.protocol.muxSubscriptions, opts);
@@ -200,11 +225,16 @@ export class NatsConnectionImpl implements NatsConnection {
     }
   }
 
-  /***
-     * Flushes to the server. Promise resolves when round-trip completes.
-     * @returns {Promise<void>}
-     */
+  /** *
+   * Flushes to the server. Promise resolves when round-trip completes.
+   * @returns {Promise<void>}
+   */
   flush(): Promise<void> {
+    if (this.isClosed()) {
+      return Promise.reject(
+        NatsError.errorForCode(ErrorCode.ConnectionClosed),
+      );
+    }
     return this.protocol.flush();
   }
 
@@ -258,14 +288,13 @@ export class NatsConnectionImpl implements NatsConnection {
   async jetstreamManager(
     opts: JetStreamOptions = {},
   ): Promise<JetStreamManager> {
-    jetstreamPreview(this);
     const adm = new JetStreamManagerImpl(this, opts);
     try {
       await adm.getAccountInfo();
     } catch (err) {
-      const ne = err as NatsError;
+      let ne = err as NatsError;
       if (ne.code === ErrorCode.NoResponders) {
-        throw NatsError.errorForCode(ErrorCode.JetStreamNotEnabled);
+        ne.code = ErrorCode.JetStreamNotEnabled;
       }
       throw ne;
     }
@@ -275,26 +304,11 @@ export class NatsConnectionImpl implements NatsConnection {
   jetstream(
     opts: JetStreamOptions = {},
   ): JetStreamClient {
-    jetstreamPreview(this);
     return new JetStreamClientImpl(this, opts);
   }
-}
 
-const jetstreamPreview = (() => {
-  let once = false;
-  return (nci: NatsConnectionImpl) => {
-    if (!once) {
-      once = true;
-      const { lang } = nci?.protocol?.transport;
-      if (lang) {
-        console.log(
-          `\u001B[33m >> jetstream functionality in ${lang} is preview functionality \u001B[0m`,
-        );
-      } else {
-        console.log(
-          `\u001B[33m >> jetstream functionality is preview functionality \u001B[0m`,
-        );
-      }
-    }
-  };
-})();
+  getServerVersion(): SemVer | undefined {
+    const info = this.info;
+    return info ? parseSemVer(info.version) : undefined;
+  }
+}
